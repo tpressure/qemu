@@ -700,14 +700,7 @@ DeviceState *qdev_device_add_from_qdict(const QDict *opts, long *category,
         }
     }
 
-    /*
-     * set dev's parent and register its id.
-     * If it fails it means the id is already taken.
-     */
     id = g_strdup(qdict_get_try_str(opts, "id"));
-    if (!qdev_set_id(dev, id, errp)) {
-        goto err_del_dev;
-    }
 
     /* set properties */
     dev->opts = qdict_clone_shallow(opts);
@@ -718,6 +711,14 @@ DeviceState *qdev_device_add_from_qdict(const QDict *opts, long *category,
     object_set_properties_from_keyval(&dev->parent_obj, dev->opts, from_json,
                                       errp);
     if (*errp) {
+        goto err_del_dev;
+    }
+
+    /*
+     * set dev's parent and register its id.
+     * If it fails it means the id is already taken.
+     */
+    if (!qdev_set_id(dev, id, errp)) {
         goto err_del_dev;
     }
 
