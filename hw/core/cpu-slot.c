@@ -22,14 +22,44 @@
 
 #include "hw/core/cpu-slot.h"
 
+static inline
+CPUTopoStatEntry *get_topo_stat_entry(CPUTopoStat *stat,
+                                      CPUTopoLevel level)
+{
+    assert(level != CPU_TOPO_UNKNOWN);
+
+    return &stat->entries[TOPO_STAT_ENTRY_IDX(level)];
+}
+
 static void cpu_slot_add_topo_info(CPUTopoState *root, CPUTopoState *child)
 {
     CPUSlot *slot = CPU_SLOT(root);
     CPUTopoLevel level = CPU_TOPO_LEVEL(child);
+    CPUTopoStatEntry *entry;
 
     if (level == CPU_TOPO_CORE) {
-        QTAILQ_INSERT_TAIL(&slot->cores, CPU_CORE(child), node);
+        CPUCore *core = CPU_CORE(child);
+        CPUTopoStatEntry *thread_entry;
+
+        QTAILQ_INSERT_TAIL(&slot->cores, core, node);
+
+        /* Max CPUs per core is pre-configured by "nr-threads". */
+        slot->stat.max_cpus += core->nr_threads;
+        slot->stat.pre_plugged_cpus += core->plugged_threads;
+
+        thread_entry = get_topo_stat_entry(&slot->stat, CPU_TOPO_THREAD);
+        if (child->max_children > thread_entry->max_units) {
+            thread_entry->max_units = child->max_children;
+        }
     }
+
+    entry = get_topo_stat_entry(&slot->stat, level);
+    entry->total_units++;
+    if (child->parent->num_children > entry->max_units) {
+        entry->max_units = child->parent->num_children;
+    }
+
+    set_bit(level, slot->stat.curr_levels);
     return;
 }
 
@@ -37,10 +67,18 @@ static void cpu_slot_del_topo_info(CPUTopoState *root, CPUTopoState *child)
 {
     CPUSlot *slot = CPU_SLOT(root);
     CPUTopoLevel level = CPU_TOPO_LEVEL(child);
+    CPUTopoStatEntry *entry;
+
+    assert(level != CPU_TOPO_UNKNOWN);
 
     if (level == CPU_TOPO_CORE) {
         QTAILQ_REMOVE(&slot->cores, CPU_CORE(child), node);
     }
+
+    entry = get_topo_stat_entry(&slot->stat, level);
+    entry->total_units--;
+
+    /* No need to update entries[*].max_units and curr_levels. */
     return;
 }
 
@@ -73,6 +111,7 @@ static void cpu_slot_instance_init(Object *obj)
     CPUSlot *slot = CPU_SLOT(obj);
 
     QTAILQ_INIT(&slot->cores);
+    set_bit(CPU_TOPO_ROOT, slot->stat.curr_levels);
 }
 
 static const TypeInfo cpu_slot_type_info = {

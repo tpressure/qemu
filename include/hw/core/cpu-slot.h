@@ -25,6 +25,47 @@
 #include "hw/cpu/core.h"
 #include "hw/qdev-core.h"
 
+/**
+ * @USER_AVAIL_LEVEL_NUM: the number of total topology levels in topology
+ *                        bitmap, which includes CPU_TOPO_UNKNOWN.
+ */
+#define USER_AVAIL_LEVEL_NUM (CPU_TOPO_ROOT + 1)
+
+/**
+ * @VALID_LEVEL_NUM: the number of valid topology levels, which excludes
+ *                   CPU_TOPO_UNKNOWN and CPU_TOPO_ROOT.
+ */
+#define VALID_LEVEL_NUM (CPU_TOPO_ROOT - 1)
+
+#define TOPO_STAT_ENTRY_IDX(level) ((level) - 1)
+
+/**
+ * CPUTopoStatEntry:
+ * @total: Total number of topological units at the same level that are
+ *         currently inserted in CPU slot
+ * @max: Maximum number of topological units at the same level under the
+ *       parent topolofical container
+ */
+typedef struct CPUTopoStatEntry {
+    unsigned int total_units;
+    unsigned int max_units;
+} CPUTopoStatEntry;
+
+/**
+ * CPUTopoStat:
+ * @max_cpus: Maximum number of CPUs in CPU slot.
+ * @pre_plugged_cpus: Number of pre-plugged CPUs in CPU slot.
+ * @entries: Detail count information for valid topology levels under
+ *           CPU slot
+ * @curr_levels: Current CPU topology levels inserted in CPU slot
+ */
+typedef struct CPUTopoStat {
+    unsigned int max_cpus;
+    unsigned int pre_plugged_cpus;
+    CPUTopoStatEntry entries[VALID_LEVEL_NUM];
+    DECLARE_BITMAP(curr_levels, USER_AVAIL_LEVEL_NUM);
+} CPUTopoStat;
+
 #define TYPE_CPU_SLOT "cpu-slot"
 
 OBJECT_DECLARE_SIMPLE_TYPE(CPUSlot, CPU_SLOT)
@@ -35,6 +76,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(CPUSlot, CPU_SLOT)
  *     where the cpu-slot is the root. cpu-slot can maintain similar
  *     queues for other topology levels to facilitate traversal
  *     when necessary.
+ * @stat: Statistical topology information for topology tree.
  */
 struct CPUSlot {
     /*< private >*/
@@ -42,6 +84,7 @@ struct CPUSlot {
 
     /*< public >*/
     QTAILQ_HEAD(, CPUCore) cores;
+    CPUTopoStat stat;
 };
 
 #endif /* CPU_SLOT_H */
