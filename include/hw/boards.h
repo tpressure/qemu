@@ -138,6 +138,11 @@ typedef struct {
  *                 provided SMP configuration
  * @books_supported - whether books are supported by the machine
  * @drawers_supported - whether drawers are supported by the machine
+ * @possible_cpus_qom_granu - the topology granularity for possible_cpus[]
+ *                            based on QOM CPU topology to plug CPUs.
+ *                            Note this flag indicates the support for QOM CPU
+ *                            topology. If QOM CPU topology is not supported,
+ *                            must set this field as CPU_TOPO_UNKNOWN.
  */
 typedef struct {
     bool prefer_sockets;
@@ -146,6 +151,7 @@ typedef struct {
     bool has_clusters;
     bool books_supported;
     bool drawers_supported;
+    CPUTopoLevel possible_cpus_qom_granu;
 } SMPCompatProps;
 
 /**
@@ -187,6 +193,9 @@ typedef struct {
  *    specifies default CPU_TYPE, which will be used for parsing target
  *    specific features and for creating CPUs if CPU name wasn't provided
  *    explicitly at CLI
+ * @default_core_tyep:
+ *    specifies default CORE_TYPE, which will be used to create default core
+ *    topology device for smp topology tree from -smp
  * @minimum_page_bits:
  *    If non-zero, the board promises never to create a CPU with a page size
  *    smaller than this, so QEMU can use a more efficient larger page
@@ -267,6 +276,7 @@ struct MachineClass {
     const char *hw_version;
     ram_addr_t default_ram_size;
     const char *default_cpu_type;
+    const char *default_core_type;
     bool default_kernel_irqchip_split;
     bool option_rom_has_mr;
     bool rom_file_has_mr;
@@ -398,6 +408,7 @@ struct MachineState {
     const char *cpu_type;
     AccelState *accelerator;
     CPUArchIdList *possible_cpus;
+    /* TODO: get rid of "smp" when all arches support QOM topology. */
     CpuTopology smp;
     CPUSlot *topo;
     struct NVDIMMState *nvdimms_state;

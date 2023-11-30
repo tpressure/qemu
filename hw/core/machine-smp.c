@@ -19,6 +19,7 @@
 
 #include "qemu/osdep.h"
 #include "hw/boards.h"
+#include "hw/core/cpu-slot.h"
 #include "qapi/error.h"
 #include "qemu/error-report.h"
 
@@ -229,6 +230,14 @@ void machine_parse_smp_config(MachineState *ms,
                    ms->smp.max_cpus,
                    mc->name, mc->max_cpus);
         return;
+    }
+
+    /*
+     * TODO: drop this check and convert "smp" to QOM topology tree by
+     * default when all arches support QOM topology.
+     */
+    if (mc->smp_props.possible_cpus_qom_granu) {
+        machine_create_smp_topo_tree(ms, errp);
     }
 }
 

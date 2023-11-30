@@ -22,6 +22,11 @@
 
 #include "hw/boards.h"
 #include "hw/core/cpu-slot.h"
+#include "hw/cpu/book.h"
+#include "hw/cpu/cluster.h"
+#include "hw/cpu/die.h"
+#include "hw/cpu/drawer.h"
+#include "hw/cpu/socket.h"
 #include "qapi/error.h"
 
 static inline
@@ -195,4 +200,216 @@ void machine_plug_cpu_slot(MachineState *ms)
     if (!mc->smp_props.drawers_supported) {
         clear_bit(CPU_TOPO_DRAWER, ms->topo->supported_levels);
     }
+}
+
+static unsigned int *get_smp_info_by_level(CpuTopology *smp_info,
+                                           CPUTopoLevel child_level)
+{
+    switch (child_level) {
+    case CPU_TOPO_THREAD:
+        return &smp_info->threads;
+    case CPU_TOPO_CORE:
+        return &smp_info->cores;
+    case CPU_TOPO_CLUSTER:
+        return &smp_info->clusters;
+    case CPU_TOPO_DIE:
+        return &smp_info->dies;
+    case CPU_TOPO_SOCKET:
+        return &smp_info->sockets;
+    case CPU_TOPO_BOOK:
+        return &smp_info->books;
+    case CPU_TOPO_DRAWER:
+        return &smp_info->drawers;
+    default:
+        /* No need to consider CPU_TOPO_UNKNOWN, and CPU_TOPO_ROOT. */
+        g_assert_not_reached();
+    }
+
+    return NULL;
+}
+
+static const char *get_topo_typename_by_level(CPUTopoLevel level)
+{
+    switch (level) {
+    case CPU_TOPO_CORE:
+        return TYPE_CPU_CORE;
+    case CPU_TOPO_CLUSTER:
+        return TYPE_CPU_CLUSTER;
+    case CPU_TOPO_DIE:
+        return TYPE_CPU_DIE;
+    case CPU_TOPO_SOCKET:
+        return TYPE_CPU_SOCKET;
+    case CPU_TOPO_BOOK:
+        return TYPE_CPU_BOOK;
+    case CPU_TOPO_DRAWER:
+        return TYPE_CPU_DRAWER;
+    default:
+        /*
+         * No need to consider CPU_TOPO_UNKNOWN, CPU_TOPO_THREAD
+         * and CPU_TOPO_ROOT.
+         */
+        g_assert_not_reached();
+    }
+
+    return NULL;
+}
+
+static char *get_topo_global_name(CPUTopoStat *stat,
+                                  CPUTopoLevel level)
+{
+    const char *type = NULL;
+    CPUTopoStatEntry *entry;
+
+    type = cpu_topo_level_to_string(level);
+    entry = get_topo_stat_entry(stat, level);
+    return g_strdup_printf("%s[%d]", type, entry->total_units);
+}
+
+typedef struct SMPBuildCbData {
+    unsigned long *supported_levels;
+    unsigned int plugged_cpus;
+    CpuTopology *smp_info;
+    CPUTopoStat *stat;
+    Error **errp;
+} SMPBuildCbData;
+
+static int smp_core_set_threads(Object *core, unsigned int max_threads,
+                                unsigned int *plugged_cpus, Error **errp)
+{
+    if (!object_property_set_int(core, "nr-threads", max_threads, errp)) {
+        object_unref(core);
+        return TOPO_FOREACH_ERR;
+    }
+
+    if (*plugged_cpus > max_threads) {
+        if (!object_property_set_int(core, "plugged-threads",
+                                     max_threads, errp)) {
+            object_unref(core);
+            return TOPO_FOREACH_ERR;
+        }
+        *plugged_cpus -= max_threads;
+    } else{
+        if (!object_property_set_int(core, "plugged-threads",
+                                     *plugged_cpus, errp)) {
+            object_unref(core);
+            return TOPO_FOREACH_ERR;
+        }
+        *plugged_cpus = 0;
+    }
+
+    return TOPO_FOREACH_CONTINUE;
+}
+
+static int add_smp_topo_child(CPUTopoState *topo, void *opaque)
+{
+    CPUTopoLevel level, child_level;
+    Object *parent = OBJECT(topo);
+    SMPBuildCbData *cb = opaque;
+    unsigned int *nr_children;
+    Error **errp = cb->errp;
+
+    level = CPU_TOPO_LEVEL(topo);
+    child_level = find_last_bit(cb->supported_levels, level);
+
+    /*
+     * child_level equals to level, that means no child needs to create.
+     * This shouldn't happen.
+     */
+    g_assert(child_level != level);
+
+    nr_children = get_smp_info_by_level(cb->smp_info, child_level);
+    topo->max_children = *nr_children;
+
+    for (int i = 0; i < topo->max_children; i++) {
+        ObjectProperty *prop;
+        Object *child;
+        gchar *name;
+
+        child = object_new(get_topo_typename_by_level(child_level));
+        name = get_topo_global_name(cb->stat, child_level);
+
+        prop = object_property_try_add_child(parent, name, child, errp);
+        g_free(name);
+        if (!prop) {
+            return TOPO_FOREACH_ERR;
+        }
+
+        if (child_level == CPU_TOPO_CORE) {
+            int ret = smp_core_set_threads(child, cb->smp_info->threads,
+                                           &cb->plugged_cpus, errp);
+
+            if (ret == TOPO_FOREACH_ERR) {
+                return ret;
+            }
+        }
+
+        qdev_realize(DEVICE(child), NULL, errp);
+        if (*errp) {
+            return TOPO_FOREACH_ERR;
+        }
+    }
+
+    return TOPO_FOREACH_CONTINUE;
+}
+
+void machine_create_smp_topo_tree(MachineState *ms, Error **errp)
+{
+    DECLARE_BITMAP(foreach_bitmap, USER_AVAIL_LEVEL_NUM);
+    MachineClass *mc = MACHINE_GET_CLASS(ms);
+    CPUSlot *slot = ms->topo;
+    SMPBuildCbData cb;
+
+    if (!slot) {
+        error_setg(errp, "Invalid machine: "
+                   "the cpu-slot of machine is not initialized.");
+        return;
+    }
+
+    if (mc->smp_props.possible_cpus_qom_granu != CPU_TOPO_CORE &&
+        mc->smp_props.possible_cpus_qom_granu != CPU_TOPO_THREAD) {
+        error_setg(errp, "Invalid machine: Only support building "
+                   "qom smp topology with core/thread granularity. "
+                   "Not support %s granularity.",
+                   cpu_topo_level_to_string(
+                       mc->smp_props.possible_cpus_qom_granu));
+        return;
+    }
+
+    cb.supported_levels = slot->supported_levels;
+    cb.plugged_cpus = ms->smp.cpus;
+    cb.smp_info = &ms->smp;
+    cb.stat = &slot->stat;
+    cb.errp = errp;
+
+    if (add_smp_topo_child(CPU_TOPO(slot), &cb) < 0) {
+        return;
+    }
+
+    bitmap_copy(foreach_bitmap, slot->supported_levels, USER_AVAIL_LEVEL_NUM);
+
+    /*
+     * Don't create threads from -smp, and just record threads
+     * number in core.
+     */
+    clear_bit(CPU_TOPO_CORE, foreach_bitmap);
+    clear_bit(CPU_TOPO_THREAD, foreach_bitmap);
+
+    /*
+     * If the core level is inserted by hotplug way, don't create cores
+     * from -smp ethier.
+     */
+    if (mc->smp_props.possible_cpus_qom_granu == CPU_TOPO_CORE) {
+        CPUTopoLevel next_level;
+
+        next_level = find_next_bit(foreach_bitmap, USER_AVAIL_LEVEL_NUM,
+                                   CPU_TOPO_CORE + 1);
+        clear_bit(next_level, foreach_bitmap);
+    }
+
+    cpu_topo_child_foreach_recursive(CPU_TOPO(slot), foreach_bitmap,
+                                     add_smp_topo_child, &cb);
+    if (*errp) {
+        return;
+    }
+    slot->smp_parsed = true;
 }

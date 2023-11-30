@@ -79,6 +79,9 @@ OBJECT_DECLARE_SIMPLE_TYPE(CPUSlot, CPU_SLOT)
  * @stat: Statistical topology information for topology tree.
  * @supported_levels: Supported topology levels for topology tree.
  * @ms: Machine in which this cpu-slot is plugged.
+ * @smp_parsed: Flag indicates if topology tree is derived from "-smp".
+ *      If not, MachineState.smp needs to be initialized based on
+ *      topology tree.
  */
 struct CPUSlot {
     /*< private >*/
@@ -89,11 +92,13 @@ struct CPUSlot {
     CPUTopoStat stat;
     DECLARE_BITMAP(supported_levels, USER_AVAIL_LEVEL_NUM);
     MachineState *ms;
+    bool smp_parsed;
 };
 
 #define MACHINE_CORE_FOREACH(ms, core) \
     QTAILQ_FOREACH((core), &(ms)->topo->cores, node)
 
 void machine_plug_cpu_slot(MachineState *ms);
+void machine_create_smp_topo_tree(MachineState *ms, Error **errp);
 
 #endif /* CPU_SLOT_H */
