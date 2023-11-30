@@ -40,6 +40,8 @@ struct CPUCore {
      * "-device"/"device_add"?
      */
     int plugged_threads;
+
+    QTAILQ_ENTRY(CPUCore) node;
 };
 
 #endif

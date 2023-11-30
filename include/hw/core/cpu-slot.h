@@ -22,17 +22,26 @@
 #define CPU_SLOT_H
 
 #include "hw/core/cpu-topo.h"
+#include "hw/cpu/core.h"
 #include "hw/qdev-core.h"
 
 #define TYPE_CPU_SLOT "cpu-slot"
 
 OBJECT_DECLARE_SIMPLE_TYPE(CPUSlot, CPU_SLOT)
 
+/**
+ * CPUSlot:
+ * @cores: Queue consisting of all the cores in the topology tree
+ *     where the cpu-slot is the root. cpu-slot can maintain similar
+ *     queues for other topology levels to facilitate traversal
+ *     when necessary.
+ */
 struct CPUSlot {
     /*< private >*/
     CPUTopoState parent_obj;
 
     /*< public >*/
+    QTAILQ_HEAD(, CPUCore) cores;
 };
 
 #endif /* CPU_SLOT_H */
