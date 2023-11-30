@@ -53,20 +53,38 @@ static void powerpc_core_prop_set_core_id(Object *obj, Visitor *v,
     core->core_id = value;
 }
 
+static void powerpc_core_realize(DeviceState *dev, Error **errp)
+{
+    CPUCore *core = CPU_CORE(dev);
+    PowerPCCoreClass *ppc_class = POWERPC_CORE_GET_CLASS(dev);
+
+    if (core->plugged_threads != -1 &&
+        core->nr_threads != core->plugged_threads) {
+        error_setg(errp, "nr_threads and plugged-threads must be equal");
+        return;
+    }
+
+    ppc_class->parent_realize(dev, errp);
+}
+
 static void powerpc_core_class_init(ObjectClass *oc, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
+    PowerPCCoreClass *ppc_class = POWERPC_CORE_CLASS(oc);
 
     object_class_property_add(oc, "core-id", "int",
                               powerpc_core_prop_get_core_id,
                               powerpc_core_prop_set_core_id,
                               NULL, NULL);
+    device_class_set_parent_realize(dc, powerpc_core_realize,
+                                    &ppc_class->parent_realize);
 }
 
 static const TypeInfo powerpc_core_type_info = {
     .name = TYPE_POWERPC_CORE,
     .parent = TYPE_CPU_CORE,
     .abstract = true,
+    .class_size = sizeof(PowerPCCoreClass),
     .class_init = powerpc_core_class_init,
     .instance_size = sizeof(PowerPCCore),
 };

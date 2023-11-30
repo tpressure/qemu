@@ -34,6 +34,7 @@ struct PowerPCCoreClass {
     CPUCoreClass parent_class;
 
     /*< public >*/
+    DeviceRealize parent_realize;
 };
 
 struct PowerPCCore {
