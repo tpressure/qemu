@@ -20,6 +20,7 @@
 
 #include "qemu/osdep.h"
 
+#include "hw/boards.h"
 #include "hw/core/cpu-slot.h"
 #include "qapi/error.h"
 
@@ -165,3 +166,33 @@ static void cpu_slot_register_types(void)
 }
 
 type_init(cpu_slot_register_types)
+
+void machine_plug_cpu_slot(MachineState *ms)
+{
+    MachineClass *mc = MACHINE_GET_CLASS(ms);
+
+    ms->topo = CPU_SLOT(qdev_new(TYPE_CPU_SLOT));
+
+    object_property_add_child(container_get(OBJECT(ms), "/peripheral"),
+                              "cpu-slot", OBJECT(ms->topo));
+    DEVICE(ms->topo)->id = g_strdup_printf("%s", "cpu-slot");
+
+    qdev_realize_and_unref(DEVICE(ms->topo), NULL, &error_abort);
+    ms->topo->ms = ms;
+
+    if (!mc->smp_props.clusters_supported) {
+        clear_bit(CPU_TOPO_CLUSTER, ms->topo->supported_levels);
+    }
+
+    if (!mc->smp_props.dies_supported) {
+        clear_bit(CPU_TOPO_DIE, ms->topo->supported_levels);
+    }
+
+    if (!mc->smp_props.books_supported) {
+        clear_bit(CPU_TOPO_BOOK, ms->topo->supported_levels);
+    }
+
+    if (!mc->smp_props.drawers_supported) {
+        clear_bit(CPU_TOPO_DRAWER, ms->topo->supported_levels);
+    }
+}

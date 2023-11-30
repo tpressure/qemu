@@ -78,6 +78,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(CPUSlot, CPU_SLOT)
  *     when necessary.
  * @stat: Statistical topology information for topology tree.
  * @supported_levels: Supported topology levels for topology tree.
+ * @ms: Machine in which this cpu-slot is plugged.
  */
 struct CPUSlot {
     /*< private >*/
@@ -87,6 +88,12 @@ struct CPUSlot {
     QTAILQ_HEAD(, CPUCore) cores;
     CPUTopoStat stat;
     DECLARE_BITMAP(supported_levels, USER_AVAIL_LEVEL_NUM);
+    MachineState *ms;
 };
+
+#define MACHINE_CORE_FOREACH(ms, core) \
+    QTAILQ_FOREACH((core), &(ms)->topo->cores, node)
+
+void machine_plug_cpu_slot(MachineState *ms);
 
 #endif /* CPU_SLOT_H */
