@@ -3208,12 +3208,14 @@ F: hw/core/bus.c
 F: hw/core/sysbus.c
 F: include/hw/qdev*
 F: include/monitor/qdev.h
+F: include/monitor/user-child.h
 F: include/qom/
 F: qapi/qom.json
 F: qapi/qdev.json
 F: scripts/coccinelle/qom-parent-type.cocci
 F: scripts/qom-cast-macro-clean-cocci-gen.py
 F: system/qdev-monitor.c
+F: system/user-child.c
 F: stubs/qdev.c
 F: qom/
 F: tests/unit/check-qom-interface.c

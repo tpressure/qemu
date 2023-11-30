@@ -24,6 +24,7 @@ system_ss.add(files(
   'runstate-hmp-cmds.c',
   'runstate.c',
   'tpm-hmp-cmds.c',
+  'user-child.c',
   'vl.c',
 ), sdl, libpmem, libdaxctl)
 

@@ -22,6 +22,7 @@
 #include "monitor/hmp.h"
 #include "monitor/monitor.h"
 #include "monitor/qdev.h"
+#include "monitor/user-child.h"
 #include "sysemu/arch_init.h"
 #include "qapi/error.h"
 #include "qapi/qapi-commands-qdev.h"
@@ -585,26 +586,93 @@ static BusState *qbus_find(const char *path, Error **errp)
     return bus;
 }
 
+static Object *qdev_find_peripheral_parent(DeviceState *dev,
+                                           Error **errp)
+{
+    Object *parent_obj, *obj = OBJECT(dev);
+
+    parent_obj = uc_provide_default_parent(obj, errp);
+    if (*errp) {
+        return NULL;
+    }
+
+    if (parent_obj) {
+        /*
+         * Non-anonymous parents (under "/peripheral") are allowed to
+         * be accessed to create child<> properties.
+         */
+        if (object_is_child_from(parent_obj, qdev_get_peripheral())) {
+            return parent_obj;
+        }
+    }
+
+    return NULL;
+}
+
+static bool qdev_pre_check_device_id(char *id, Error **errp)
+{
+    bool ambiguous = false;
+    Object *obj;
+
+    if (!id) {
+        return true;
+    }
+
+    obj = object_resolve_path_from(qdev_get_peripheral(), id, &ambiguous);
+    if (obj || ambiguous) {
+        error_setg(errp, "Duplicate device default ID '%s'. "
+                   "Please specify another 'id'", id);
+        return false;
+    }
+    return true;
+}
+
 /* Takes ownership of @id, will be freed when deleting the device */
 const char *qdev_set_id(DeviceState *dev, char *id, Error **errp)
 {
+    Object *parent_obj = NULL;
     ObjectProperty *prop;
+    UserChild *uc;
 
     assert(!dev->id && !dev->realized);
+
+    uc = (UserChild *)object_dynamic_cast(OBJECT(dev), TYPE_USER_CHILD);
+
+    if (uc) {
+        parent_obj = qdev_find_peripheral_parent(dev, errp);
+        if (*errp) {
+            goto err;
+        }
+
+        if (!id && parent_obj) {
+            /*
+             * Covert anonymous device with user-child interface to
+             * non-anonymous, then it will be insert under "/peripheral"
+             * path.
+             */
+            id = uc_name_future_child(OBJECT(dev), parent_obj);
+            if (!qdev_pre_check_device_id(id, errp)) {
+                goto err;
+            }
+        }
+    }
 
     /*
      * object_property_[try_]add_child() below will assert the device
      * has no parent
      */
     if (id) {
-        prop = object_property_try_add_child(qdev_get_peripheral(), id,
+        if (!parent_obj) {
+            parent_obj = qdev_get_peripheral();
+        }
+
+        prop = object_property_try_add_child(parent_obj, id,
                                              OBJECT(dev), NULL);
         if (prop) {
             dev->id = id;
         } else {
             error_setg(errp, "Duplicate device ID '%s'", id);
-            g_free(id);
-            return NULL;
+            goto err;
         }
     } else {
         static int anon_count;
@@ -615,6 +683,9 @@ const char *qdev_set_id(DeviceState *dev, char *id, Error **errp)
     }
 
     return prop->name;
+err:
+    g_free(id);
+    return NULL;
 }
 
 DeviceState *qdev_device_add_from_qdict(const QDict *opts, long *category,
@@ -885,12 +956,18 @@ void qmp_device_add(QDict *qdict, QObject **ret_data, Error **errp)
 
 static DeviceState *find_device_state(const char *id, Error **errp)
 {
-    Object *obj = object_resolve_path_at(qdev_get_peripheral(), id);
+    bool ambiguous = false;
     DeviceState *dev;
+    Object *obj;
 
+    obj = object_resolve_path_from(qdev_get_peripheral(), id, &ambiguous);
     if (!obj) {
-        error_set(errp, ERROR_CLASS_DEVICE_NOT_FOUND,
-                  "Device '%s' not found", id);
+        if (ambiguous) {
+            error_setg(errp, "Device ID '%s' is ambiguous", id);
+        } else {
+            error_set(errp, ERROR_CLASS_DEVICE_NOT_FOUND,
+                      "Device '%s' not found", id);
+        }
         return NULL;
     }
 

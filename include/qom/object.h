@@ -1485,6 +1485,17 @@ Object *object_get_objects_root(void);
 Object *object_get_internal_root(void);
 
 /**
+ * object_is_child_from:
+ * @child: the object.
+ * @parent: the parent/non-direct parent object.
+ *
+ * Check whether @parent is the parent/non-direct parent of @child.
+ *
+ * Returns: true iff @parent is the parent/non-direct parent of @child.
+ */
+bool object_is_child_from(const Object *child, const Object *parent);
+
+/**
  * object_get_canonical_path_component:
  * @obj: the object
  *

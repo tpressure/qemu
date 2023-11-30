@@ -2024,6 +2024,19 @@ object_property_add_const_link(Object *obj, const char *name,
                                 NULL, OBJ_PROP_LINK_DIRECT);
 }
 
+bool object_is_child_from(const Object *child, const Object *parent)
+{
+    Object *obj = child->parent;
+
+    while (obj) {
+        if (obj == parent) {
+            return true;
+        }
+        obj = obj->parent;
+    }
+    return false;
+}
+
 const char *object_get_canonical_path_component(const Object *obj)
 {
     ObjectProperty *prop = NULL;
