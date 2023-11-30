@@ -1,5 +1,5 @@
 /*
- * QEMU CPU cluster
+ * CPU cluster abstract device
  *
  * Copyright (c) 2018 GreenSocs SAS
  *

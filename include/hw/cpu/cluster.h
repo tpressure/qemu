@@ -1,5 +1,5 @@
 /*
- * QEMU CPU cluster
+ * CPU cluster abstract device
  *
  * Copyright (c) 2018 GreenSocs SAS
  *
@@ -24,16 +24,26 @@
 #include "qom/object.h"
 
 /*
- * CPU Cluster type
+ * # CPU Cluster
  *
- * A cluster is a group of CPUs which are all identical and have the same view
- * of the rest of the system. It is mainly an internal QEMU representation and
- * does not necessarily match with the notion of clusters on the real hardware.
+ * A cluster is a group of CPUs, that is, a level above the CPU (or Core).
+ *
+ * - For accel case, it's a CPU topology level concept above cores, in which
+ * the cores may share some resources (L2 cache or some others like L3
+ * cache tags, depending on the Archs). It is used to emulate the physical
+ * CPU cluster/module.
+ *
+ * - For TCG, cluster is used to organize CPUs directly without core. In one
+ * cluster, CPUs are all identical and have the same view of the rest of the
+ * system. It is mainly an internal QEMU representation and may not necessarily
+ * match with the notion of clusters on the real hardware.
  *
  * If CPUs are not identical (for example, Cortex-A53 and Cortex-A57 CPUs in an
  * Arm big.LITTLE system) they should be in different clusters. If the CPUs do
  * not have the same view of memory (for example the main CPU and a management
  * controller processor) they should be in different clusters.
+ *
+ * # Use case for cluster in TCG
  *
  * A cluster is created by creating an object of TYPE_CPU_CLUSTER, and then
  * adding the CPUs to it as QOM child objects (e.g. using the
