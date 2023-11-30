@@ -318,3 +318,44 @@ static void cpu_topo_register_types(void)
 }
 
 type_init(cpu_topo_register_types)
+
+static int do_cpu_topo_child_foreach(CPUTopoState *topo,
+                                     unsigned long *levels,
+                                     topo_fn fn, void *opaque,
+                                     bool recurse)
+{
+    CPUTopoState *child;
+    int ret = TOPO_FOREACH_CONTINUE;
+
+    QTAILQ_FOREACH(child, &topo->children, sibling) {
+        if (!levels || (levels && test_bit(CPU_TOPO_LEVEL(child), levels))) {
+            ret = fn(child, opaque);
+            if (ret == TOPO_FOREACH_END || ret == TOPO_FOREACH_ERR) {
+                break;
+            } else if (ret == TOPO_FOREACH_SIBLING) {
+                continue;
+            }
+        }
+
+        if (recurse) {
+            ret = do_cpu_topo_child_foreach(child, levels, fn, opaque, recurse);
+            if (ret != TOPO_FOREACH_CONTINUE) {
+                break;
+            }
+        }
+    }
+    return ret;
+}
+
+int cpu_topo_child_foreach(CPUTopoState *topo, unsigned long *levels,
+                           topo_fn fn, void *opaque)
+{
+    return do_cpu_topo_child_foreach(topo, levels, fn, opaque, false);
+}
+
+int cpu_topo_child_foreach_recursive(CPUTopoState *topo,
+                                     unsigned long *levels,
+                                     topo_fn fn, void *opaque)
+{
+    return do_cpu_topo_child_foreach(topo, levels, fn, opaque, true);
+}

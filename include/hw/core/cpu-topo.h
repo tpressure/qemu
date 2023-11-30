@@ -90,4 +90,17 @@ struct CPUTopoState {
 
 #define CPU_TOPO_LEVEL(topo)    (CPU_TOPO_GET_CLASS(topo)->level)
 
+#define TOPO_FOREACH_SIBLING         2
+#define TOPO_FOREACH_END             1
+#define TOPO_FOREACH_CONTINUE        0
+#define TOPO_FOREACH_ERR             -1
+
+typedef int (*topo_fn)(CPUTopoState *topo, void *opaque);
+
+int cpu_topo_child_foreach(CPUTopoState *topo, unsigned long *levels,
+                           topo_fn fn, void *opaque);
+int cpu_topo_child_foreach_recursive(CPUTopoState *topo,
+                                     unsigned long *levels,
+                                     topo_fn fn, void *opaque);
+
 #endif /* CPU_TOPO_H */
