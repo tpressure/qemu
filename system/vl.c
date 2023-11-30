@@ -1197,8 +1197,9 @@ static int device_help_func(void *opaque, QemuOpts *opts, Error **errp)
 static int device_init_func(void *opaque, QemuOpts *opts, Error **errp)
 {
     DeviceState *dev;
+    long *category = opaque;
 
-    dev = qdev_device_add(opts, NULL, errp);
+    dev = qdev_device_add(opts, category, errp);
     if (!dev && *errp) {
         error_report_err(*errp);
         return -1;
@@ -2617,25 +2618,13 @@ static void qemu_init_board(void)
     realtime_init();
 }
 
-static void qemu_create_cli_devices(void)
+static void qemu_create_cli_devices(long *category)
 {
     DeviceOption *opt;
 
-    soundhw_init();
-
-    qemu_opts_foreach(qemu_find_opts("fw_cfg"),
-                      parse_fw_cfg, fw_cfg_find(), &error_fatal);
-
-    /* init USB devices */
-    if (machine_usb(current_machine)) {
-        if (foreach_device_config(DEV_USB, usb_parse) < 0)
-            exit(1);
-    }
-
-    /* init generic devices */
     rom_set_order_override(FW_CFG_ORDER_OVERRIDE_DEVICE);
     qemu_opts_foreach(qemu_find_opts("device"),
-                      device_init_func, NULL, &error_fatal);
+                      device_init_func, category, &error_fatal);
     QTAILQ_FOREACH(opt, &device_opts, next) {
         DeviceState *dev;
         loc_push_restore(&opt->loc);
@@ -2646,11 +2635,38 @@ static void qemu_create_cli_devices(void)
          * from the start, so call qdev_device_add_from_qdict() directly for
          * now.
          */
-        dev = qdev_device_add_from_qdict(opt->opts, NULL, true, &error_fatal);
+        dev = qdev_device_add_from_qdict(opt->opts, category,
+                                         true, &error_fatal);
         object_unref(OBJECT(dev));
         loc_pop(&opt->loc);
     }
     rom_reset_order_override();
+}
+
+static void qemu_create_cli_base_devices(void)
+{
+    long category = DEVICE_CATEGORY_CPU_DEF;
+
+    qemu_opts_foreach(qemu_find_opts("fw_cfg"),
+                      parse_fw_cfg, fw_cfg_find(), &error_fatal);
+
+    /* init CPU topology devices which don't support hotplug. */
+    qemu_create_cli_devices(&category);
+}
+
+static void qemu_create_cli_periphery_devices(void)
+{
+    soundhw_init();
+
+    /* init USB devices */
+    if (machine_usb(current_machine)) {
+        if (foreach_device_config(DEV_USB, usb_parse) < 0) {
+            exit(1);
+        }
+    }
+
+    /* init generic devices */
+    qemu_create_cli_devices(NULL);
 }
 
 static void qemu_machine_creation_done(void)
@@ -2701,8 +2717,9 @@ void qmp_x_exit_preconfig(Error **errp)
         return;
     }
 
+    qemu_create_cli_base_devices();
     qemu_init_board();
-    qemu_create_cli_devices();
+    qemu_create_cli_periphery_devices();
     qemu_machine_creation_done();
 
     if (loadvm) {
