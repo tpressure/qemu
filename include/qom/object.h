@@ -1563,6 +1563,21 @@ Object *object_resolve_path_type(const char *path, const char *typename,
 Object *object_resolve_path_at(Object *parent, const char *path);
 
 /**
+ * object_resolve_path_from:
+ * @parent: the object from which to resolve the path
+ * @path: the path to resolve
+ * @ambiguous: returns true if the path resolution failed because of an
+ *   ambiguous match
+ *
+ * This is like object_resolve_path_at(), except @parent may be the
+ * partial parent of @path.
+ *
+ * Returns: The resolved object or NULL on path lookup failure.
+ */
+Object *object_resolve_path_from(Object *parent, const char *path,
+                                 bool *ambiguous);
+
+/**
  * object_resolve_path_component:
  * @parent: the object in which to resolve the path
  * @part: the component to resolve.
