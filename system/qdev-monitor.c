@@ -587,22 +587,33 @@ static BusState *qbus_find(const char *path, Error **errp)
 }
 
 static Object *qdev_find_peripheral_parent(DeviceState *dev,
+                                           char *parent_id,
                                            Error **errp)
 {
     Object *parent_obj, *obj = OBJECT(dev);
 
-    parent_obj = uc_provide_default_parent(obj, errp);
-    if (*errp) {
-        return NULL;
-    }
+    if (parent_id) {
+        parent_obj = object_resolve_path_from(qdev_get_peripheral(),
+                                              parent_id, NULL);
+        if (parent_obj) {
+            if (uc_check_user_parent(obj, parent_obj)) {
+                return parent_obj;
+            }
+        }
+    } else {
+        parent_obj = uc_provide_default_parent(obj, errp);
+        if (*errp) {
+            return NULL;
+        }
 
-    if (parent_obj) {
-        /*
-         * Non-anonymous parents (under "/peripheral") are allowed to
-         * be accessed to create child<> properties.
-         */
-        if (object_is_child_from(parent_obj, qdev_get_peripheral())) {
-            return parent_obj;
+        if (parent_obj) {
+            /*
+             * Non-anonymous parents (under "/peripheral") are allowed to
+             * be accessed to create child<> properties.
+             */
+            if (object_is_child_from(parent_obj, qdev_get_peripheral())) {
+                return parent_obj;
+            }
         }
     }
 
@@ -628,7 +639,8 @@ static bool qdev_pre_check_device_id(char *id, Error **errp)
 }
 
 /* Takes ownership of @id, will be freed when deleting the device */
-const char *qdev_set_id(DeviceState *dev, char *id, Error **errp)
+const char *qdev_set_id(DeviceState *dev, char *id,
+                        char *parent, Error **errp)
 {
     Object *parent_obj = NULL;
     ObjectProperty *prop;
@@ -639,7 +651,7 @@ const char *qdev_set_id(DeviceState *dev, char *id, Error **errp)
     uc = (UserChild *)object_dynamic_cast(OBJECT(dev), TYPE_USER_CHILD);
 
     if (uc) {
-        parent_obj = qdev_find_peripheral_parent(dev, errp);
+        parent_obj = qdev_find_peripheral_parent(dev, parent, errp);
         if (*errp) {
             goto err;
         }
@@ -655,6 +667,11 @@ const char *qdev_set_id(DeviceState *dev, char *id, Error **errp)
                 goto err;
             }
         }
+        g_free(parent);
+    } else if (parent) {
+        error_setg(errp, "Only the device implemented user-child "
+                   "interface supports `parent` option.");
+        goto err;
     }
 
     /*
@@ -684,6 +701,7 @@ const char *qdev_set_id(DeviceState *dev, char *id, Error **errp)
 
     return prop->name;
 err:
+    g_free(parent);
     g_free(id);
     return NULL;
 }
@@ -694,7 +712,7 @@ DeviceState *qdev_device_add_from_qdict(const QDict *opts, long *category,
     ERRP_GUARD();
     DeviceClass *dc;
     const char *driver, *path;
-    char *id;
+    char *id, *parent;
     DeviceState *dev = NULL;
     BusState *bus = NULL;
 
@@ -772,12 +790,14 @@ DeviceState *qdev_device_add_from_qdict(const QDict *opts, long *category,
     }
 
     id = g_strdup(qdict_get_try_str(opts, "id"));
+    parent = g_strdup(qdict_get_try_str(opts, "parent"));
 
     /* set properties */
     dev->opts = qdict_clone_shallow(opts);
     qdict_del(dev->opts, "driver");
     qdict_del(dev->opts, "bus");
     qdict_del(dev->opts, "id");
+    qdict_del(dev->opts, "parent");
 
     object_set_properties_from_keyval(&dev->parent_obj, dev->opts, from_json,
                                       errp);
@@ -789,7 +809,7 @@ DeviceState *qdev_device_add_from_qdict(const QDict *opts, long *category,
      * set dev's parent and register its id.
      * If it fails it means the id is already taken.
      */
-    if (!qdev_set_id(dev, id, errp)) {
+    if (!qdev_set_id(dev, id, parent, errp)) {
         goto err_del_dev;
     }
 

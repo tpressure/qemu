@@ -16,6 +16,7 @@ DeviceState *qdev_device_add_from_qdict(const QDict *opts, long *category,
  * qdev_set_id: parent the device and set its id if provided.
  * @dev: device to handle
  * @id: id to be given to the device, or NULL.
+ * @parent: parent to be set for the device, or NULL.
  *
  * Returns: the id of the device in case of success; otherwise NULL.
  *
@@ -34,6 +35,6 @@ DeviceState *qdev_device_add_from_qdict(const QDict *opts, long *category,
  * returned string is owned by the corresponding child property and must
  * not be freed by the caller.
  */
-const char *qdev_set_id(DeviceState *dev, char *id, Error **errp);
+const char *qdev_set_id(DeviceState *dev, char *id, char *parent, Error **errp);
 
 #endif
