@@ -55,13 +55,31 @@
  */
 
 #define TYPE_CPU_CLUSTER "cpu-cluster"
-OBJECT_DECLARE_SIMPLE_TYPE(CPUCluster, CPU_CLUSTER)
+OBJECT_DECLARE_TYPE(CPUCluster, CPUClusterClass, CPU_CLUSTER)
 
 /*
  * This limit is imposed by TCG, which puts the cluster ID into an
  * 8 bit field (and uses all-1s for the default "not in any cluster").
  */
-#define MAX_CLUSTERS 255
+#define MAX_TCG_CLUSTERS 255
+
+struct TCGClusterOps {
+    /**
+     * @collect_cpus: Iterate children CPUs and set cluser_index.
+     *
+     * Called when the cluster is realized.
+     */
+    void (*collect_cpus)(CPUCluster *cluster, Error **errp);
+};
+
+struct CPUClusterClass {
+    /*< private >*/
+    DeviceClass parent_class;
+
+    /*< public >*/
+    /* when TCG is not available, this pointer is NULL */
+    const struct TCGClusterOps *tcg_clu_ops;
+};
 
 /**
  * CPUCluster:

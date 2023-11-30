@@ -26,7 +26,9 @@
 #include "qapi/error.h"
 
 static Property cpu_cluster_properties[] = {
+#ifdef CONFIG_TCG
     DEFINE_PROP_UINT32("cluster-id", CPUCluster, cluster_id, 0),
+#endif
     DEFINE_PROP_END_OF_LIST()
 };
 
@@ -47,18 +49,17 @@ static int add_cpu_to_cluster(Object *obj, void *opaque)
     return 0;
 }
 
-static void cpu_cluster_realize(DeviceState *dev, Error **errp)
+static void cpu_cluster_common_collect_cpus(CPUCluster *cluster, Error **errp)
 {
     /* Iterate through all our CPU children and set their cluster_index */
-    CPUCluster *cluster = CPU_CLUSTER(dev);
-    Object *cluster_obj = OBJECT(dev);
+    Object *cluster_obj = OBJECT(cluster);
     CallbackData cbdata = {
         .cluster = cluster,
         .cpu_count = 0,
     };
 
-    if (cluster->cluster_id >= MAX_CLUSTERS) {
-        error_setg(errp, "cluster-id must be less than %d", MAX_CLUSTERS);
+    if (cluster->cluster_id >= MAX_TCG_CLUSTERS) {
+        error_setg(errp, "cluster-id must be less than %d", MAX_TCG_CLUSTERS);
         return;
     }
 
@@ -73,15 +74,34 @@ static void cpu_cluster_realize(DeviceState *dev, Error **errp)
     assert(cbdata.cpu_count > 0);
 }
 
+static const struct TCGClusterOps common_cluster_tcg_ops = {
+    .collect_cpus = cpu_cluster_common_collect_cpus,
+};
+
+static void cpu_cluster_realize(DeviceState *dev, Error **errp)
+{
+    CPUCluster *cluster = CPU_CLUSTER(dev);
+    CPUClusterClass *cc = CPU_CLUSTER_GET_CLASS(dev);
+
+    if (cc->tcg_clu_ops->collect_cpus) {
+        cc->tcg_clu_ops->collect_cpus(cluster, errp);
+    }
+}
+
 static void cpu_cluster_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+    CPUClusterClass *cc = CPU_CLUSTER_CLASS(klass);
 
     device_class_set_props(dc, cpu_cluster_properties);
     dc->realize = cpu_cluster_realize;
 
     /* This is not directly for users, CPU children must be attached by code */
     dc->user_creatable = false;
+
+#ifdef CONFIG_TCG
+    cc->tcg_clu_ops = &common_cluster_tcg_ops;
+#endif
 }
 
 static const TypeInfo cpu_cluster_type_info = {
