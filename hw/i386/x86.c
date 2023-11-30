@@ -94,15 +94,22 @@ uint32_t x86_cpu_apic_id_from_index(X86MachineState *x86ms,
     return x86_apicid_from_cpu_idx(&topo_info, cpu_index);
 }
 
-
 static void x86_cpu_new(X86MachineState *x86ms, int64_t apic_id,
-                        Error **errp)
+                        Object *parent, int index, Error **errp)
 {
-    Object *cpu = object_new(MACHINE(x86ms)->cpu_type);
+    const char *cpu_type = MACHINE(x86ms)->cpu_type;
+    Object *cpu = object_new(cpu_type);
 
     if (!object_property_set_uint(cpu, "apic-id", apic_id, errp)) {
         goto out;
     }
+
+    if (parent) {
+        char *name = g_strdup_printf("%s[%d]", cpu_type, index);
+        object_property_add_child(parent, name, cpu);
+        g_free(name);
+    }
+
     qdev_realize(DEVICE(cpu), NULL, errp);
 
 out:
@@ -146,7 +153,8 @@ void x86_cpus_init(X86MachineState *x86ms, int default_cpu_version)
 
     possible_cpus = mc->possible_cpu_arch_ids(ms);
     for (i = 0; i < ms->smp.cpus; i++) {
-        x86_cpu_new(x86ms, possible_cpus->cpus[i].arch_id, &error_fatal);
+        x86_cpu_new(x86ms, possible_cpus->cpus[i].arch_id,
+                    NULL, i, &error_fatal);
     }
 }
 
