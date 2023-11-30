@@ -1,4 +1,4 @@
-system_ss.add(files('core.c', 'cluster.c', 'die.c'))
+system_ss.add(files('core.c', 'cluster.c', 'die.c', 'socket.c'))
 
 system_ss.add(when: 'CONFIG_ARM11MPCORE', if_true: files('arm11mpcore.c'))
 system_ss.add(when: 'CONFIG_REALVIEW', if_true: files('realview_mpcore.c'))
