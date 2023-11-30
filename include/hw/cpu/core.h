@@ -21,7 +21,16 @@ struct CPUCore {
     DeviceState parent_obj;
 
     /*< public >*/
+    int core_id;
+
+    /* Maximum number of threads contained in this core. */
     int nr_threads;
+
+    /*
+     * How many threads should be plugged in this core via
+     * "-device"/"device_add"?
+     */
+    int plugged_threads;
 };
 
 #endif

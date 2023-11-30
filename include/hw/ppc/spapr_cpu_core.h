@@ -37,6 +37,8 @@ struct SpaprCpuCoreClass {
 
     /*< public >*/
     const char *cpu_type;
+
+    DeviceRealize parent_realize;
 };
 
 const char *spapr_get_cpu_core_type(const char *cpu_type);
