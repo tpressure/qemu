@@ -292,7 +292,7 @@ static bool spapr_realize_vcpu(PowerPCCPU *cpu, SpaprMachineState *spapr,
 static PowerPCCPU *spapr_create_vcpu(SpaprCpuCore *sc, int i, Error **errp)
 {
     SpaprCpuCoreClass *scc = SPAPR_CPU_CORE_GET_CLASS(sc);
-    CPUCore *cc = CPU_CORE(sc);
+    PowerPCCore *ppc = POWERPC_CORE(sc);
     g_autoptr(Object) obj = NULL;
     g_autofree char *id = NULL;
     CPUState *cs;
@@ -307,7 +307,7 @@ static PowerPCCPU *spapr_create_vcpu(SpaprCpuCore *sc, int i, Error **errp)
      * and the rest are explicitly started up by the guest using an RTAS call.
      */
     cs->start_powered_off = true;
-    cs->cpu_index = cc->core_id + i;
+    cs->cpu_index = ppc->core_id + i;
     if (!spapr_set_vcpu_id(cpu, cs->cpu_index, errp)) {
         return NULL;
     }
@@ -381,7 +381,7 @@ static void spapr_cpu_core_class_init(ObjectClass *oc, void *data)
 static const TypeInfo spapr_cpu_core_type_infos[] = {
     {
         .name = TYPE_SPAPR_CPU_CORE,
-        .parent = TYPE_CPU_CORE,
+        .parent = TYPE_POWERPC_CORE,
         .abstract = true,
         .instance_size = sizeof(SpaprCpuCore),
         .class_size = sizeof(SpaprCpuCoreClass),

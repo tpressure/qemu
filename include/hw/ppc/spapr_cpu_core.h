@@ -9,7 +9,7 @@
 #ifndef HW_SPAPR_CPU_CORE_H
 #define HW_SPAPR_CPU_CORE_H
 
-#include "hw/cpu/core.h"
+#include "hw/ppc/ppc_core.h"
 #include "hw/qdev-core.h"
 #include "target/ppc/cpu-qom.h"
 #include "target/ppc/cpu.h"
@@ -23,7 +23,7 @@ OBJECT_DECLARE_TYPE(SpaprCpuCore, SpaprCpuCoreClass,
 
 struct SpaprCpuCore {
     /*< private >*/
-    CPUCore parent_obj;
+    PowerPCCore parent_obj;
 
     /*< public >*/
     PowerPCCPU **threads;
@@ -32,7 +32,10 @@ struct SpaprCpuCore {
 };
 
 struct SpaprCpuCoreClass {
-    DeviceClass parent_class;
+    /*< private >*/
+    PowerPCCoreClass parent_class;
+
+    /*< public >*/
     const char *cpu_type;
 };
 

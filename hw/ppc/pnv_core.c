@@ -267,6 +267,7 @@ static void pnv_core_realize(DeviceState *dev, Error **errp)
     PnvCore *pc = PNV_CORE(OBJECT(dev));
     PnvCoreClass *pcc = PNV_CORE_GET_CLASS(pc);
     CPUCore *cc = CPU_CORE(OBJECT(dev));
+    PowerPCCore *ppc = POWERPC_CORE(cc);
     const char *typename = pnv_core_cpu_typename(pc);
     Error *local_err = NULL;
     void *obj;
@@ -299,7 +300,7 @@ static void pnv_core_realize(DeviceState *dev, Error **errp)
         }
     }
 
-    snprintf(name, sizeof(name), "xscom-core.%d", cc->core_id);
+    snprintf(name, sizeof(name), "xscom-core.%d", ppc->core_id);
     pnv_xscom_region_init(&pc->xscom_regs, OBJECT(dev), pcc->xscom_ops,
                           pc, name, pcc->xscom_size);
 
@@ -392,7 +393,7 @@ static void pnv_core_class_init(ObjectClass *oc, void *data)
 static const TypeInfo pnv_core_infos[] = {
     {
         .name           = TYPE_PNV_CORE,
-        .parent         = TYPE_CPU_CORE,
+        .parent         = TYPE_POWERPC_CORE,
         .instance_size  = sizeof(PnvCore),
         .class_size     = sizeof(PnvCoreClass),
         .class_init = pnv_core_class_init,

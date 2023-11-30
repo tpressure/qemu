@@ -2713,7 +2713,7 @@ static void spapr_init_cpus(SpaprMachineState *spapr)
 
             object_property_set_int(core, "nr-threads", nr_threads,
                                     &error_fatal);
-            object_property_set_int(core, CPU_CORE_PROP_CORE_ID, core_id,
+            object_property_set_int(core, POWERPC_CORE_PROP_CORE_ID, core_id,
                                     &error_fatal);
             qdev_realize(DEVICE(core), NULL, &error_fatal);
 
@@ -3889,7 +3889,8 @@ static void spapr_core_unplug(HotplugHandler *hotplug_dev, DeviceState *dev)
     MachineState *ms = MACHINE(hotplug_dev);
     SpaprMachineClass *smc = SPAPR_MACHINE_GET_CLASS(ms);
     CPUCore *cc = CPU_CORE(dev);
-    CPUArchId *core_slot = spapr_find_cpu_slot(ms, cc->core_id, NULL);
+    PowerPCCore *ppc = POWERPC_CORE(cc);
+    CPUArchId *core_slot = spapr_find_cpu_slot(ms, ppc->core_id, NULL);
 
     if (smc->pre_2_10_has_unused_icps) {
         SpaprCpuCore *sc = SPAPR_CPU_CORE(OBJECT(dev));
@@ -3915,10 +3916,11 @@ void spapr_core_unplug_request(HotplugHandler *hotplug_dev, DeviceState *dev,
     int index;
     SpaprDrc *drc;
     CPUCore *cc = CPU_CORE(dev);
+    PowerPCCore *ppc = POWERPC_CORE(cc);
 
-    if (!spapr_find_cpu_slot(MACHINE(hotplug_dev), cc->core_id, &index)) {
+    if (!spapr_find_cpu_slot(MACHINE(hotplug_dev), ppc->core_id, &index)) {
         error_setg(errp, "Unable to find CPU core with core-id: %d",
-                   cc->core_id);
+                   ppc->core_id);
         return;
     }
     if (index == 0) {
@@ -3927,7 +3929,7 @@ void spapr_core_unplug_request(HotplugHandler *hotplug_dev, DeviceState *dev,
     }
 
     drc = spapr_drc_by_id(TYPE_SPAPR_DRC_CPU,
-                          spapr_vcpu_id(spapr, cc->core_id));
+                          spapr_vcpu_id(spapr, ppc->core_id));
     g_assert(drc);
 
     if (!spapr_drc_unplug_requested(drc)) {
@@ -3985,6 +3987,7 @@ static void spapr_core_plug(HotplugHandler *hotplug_dev, DeviceState *dev)
     SpaprMachineClass *smc = SPAPR_MACHINE_CLASS(mc);
     SpaprCpuCore *core = SPAPR_CPU_CORE(OBJECT(dev));
     CPUCore *cc = CPU_CORE(dev);
+    PowerPCCore *ppc = POWERPC_CORE(cc);
     CPUState *cs;
     SpaprDrc *drc;
     CPUArchId *core_slot;
@@ -3992,11 +3995,11 @@ static void spapr_core_plug(HotplugHandler *hotplug_dev, DeviceState *dev)
     bool hotplugged = spapr_drc_hotplugged(dev);
     int i;
 
-    core_slot = spapr_find_cpu_slot(MACHINE(hotplug_dev), cc->core_id, &index);
+    core_slot = spapr_find_cpu_slot(MACHINE(hotplug_dev), ppc->core_id, &index);
     g_assert(core_slot); /* Already checked in spapr_core_pre_plug() */
 
     drc = spapr_drc_by_id(TYPE_SPAPR_DRC_CPU,
-                          spapr_vcpu_id(spapr, cc->core_id));
+                          spapr_vcpu_id(spapr, ppc->core_id));
 
     g_assert(drc || !mc->has_hotpluggable_cpus);
 
@@ -4047,6 +4050,7 @@ static void spapr_core_pre_plug(HotplugHandler *hotplug_dev, DeviceState *dev,
     MachineState *machine = MACHINE(OBJECT(hotplug_dev));
     MachineClass *mc = MACHINE_GET_CLASS(hotplug_dev);
     CPUCore *cc = CPU_CORE(dev);
+    PowerPCCore *ppc = POWERPC_CORE(cc);
     const char *base_core_type = spapr_get_cpu_core_type(machine->cpu_type);
     const char *type = object_get_typename(OBJECT(dev));
     CPUArchId *core_slot;
@@ -4063,8 +4067,8 @@ static void spapr_core_pre_plug(HotplugHandler *hotplug_dev, DeviceState *dev,
         return;
     }
 
-    if (cc->core_id % smp_threads) {
-        error_setg(errp, "invalid core id %d", cc->core_id);
+    if (ppc->core_id % smp_threads) {
+        error_setg(errp, "invalid core id %d", ppc->core_id);
         return;
     }
 
@@ -4080,14 +4084,14 @@ static void spapr_core_pre_plug(HotplugHandler *hotplug_dev, DeviceState *dev,
         return;
     }
 
-    core_slot = spapr_find_cpu_slot(MACHINE(hotplug_dev), cc->core_id, &index);
+    core_slot = spapr_find_cpu_slot(MACHINE(hotplug_dev), ppc->core_id, &index);
     if (!core_slot) {
-        error_setg(errp, "core id %d out of range", cc->core_id);
+        error_setg(errp, "core id %d out of range", ppc->core_id);
         return;
     }
 
     if (core_slot->cpu) {
-        error_setg(errp, "core %d already populated", cc->core_id);
+        error_setg(errp, "core %d already populated", ppc->core_id);
         return;
     }
 

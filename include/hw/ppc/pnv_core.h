@@ -20,9 +20,9 @@
 #ifndef PPC_PNV_CORE_H
 #define PPC_PNV_CORE_H
 
-#include "hw/cpu/core.h"
 #include "target/ppc/cpu.h"
 #include "hw/ppc/pnv.h"
+#include "hw/ppc/ppc_core.h"
 #include "qom/object.h"
 
 #define TYPE_PNV_CORE "powernv-cpu-core"
@@ -31,7 +31,7 @@ OBJECT_DECLARE_TYPE(PnvCore, PnvCoreClass,
 
 struct PnvCore {
     /*< private >*/
-    CPUCore parent_obj;
+    PowerPCCore parent_obj;
 
     /*< public >*/
     PowerPCCPU **threads;
@@ -43,8 +43,10 @@ struct PnvCore {
 };
 
 struct PnvCoreClass {
-    DeviceClass parent_class;
+    /*< private >*/
+    PowerPCCoreClass parent_class;
 
+    /*< public >*/
     const MemoryRegionOps *xscom_ops;
     uint64_t xscom_size;
 };

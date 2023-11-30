@@ -2,6 +2,7 @@ ppc_ss = ss.source_set()
 ppc_ss.add(files(
   'ppc.c',
   'ppc_booke.c',
+  'ppc_core.c',
 ))
 ppc_ss.add(when: 'CONFIG_FDT_PPC', if_true: [files(
   'fdt.c',

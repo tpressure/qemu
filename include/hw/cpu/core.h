@@ -21,13 +21,7 @@ struct CPUCore {
     DeviceState parent_obj;
 
     /*< public >*/
-    int core_id;
     int nr_threads;
 };
-
-/* Note: topology field names need to be kept in sync with
- * 'CpuInstanceProperties' */
-
-#define CPU_CORE_PROP_CORE_ID "core-id"
 
 #endif

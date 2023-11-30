@@ -1224,7 +1224,7 @@ static void pnv_chip_icp_realize(Pnv8Chip *chip8, Error **errp)
     /* Map the ICP registers for each thread */
     for (i = 0; i < chip->nr_cores; i++) {
         PnvCore *pnv_core = chip->cores[i];
-        int core_hwid = CPU_CORE(pnv_core)->core_id;
+        int core_hwid = POWERPC_CORE(pnv_core)->core_id;
 
         for (j = 0; j < CPU_CORE(pnv_core)->nr_threads; j++) {
             uint32_t pir = pcc->core_pir(chip, core_hwid) + j;
@@ -1443,7 +1443,7 @@ static void pnv_chip_quad_realize_one(PnvChip *chip, PnvQuad *eq,
                                       const char *type)
 {
     char eq_name[32];
-    int core_id = CPU_CORE(pnv_core)->core_id;
+    int core_id = POWERPC_CORE(pnv_core)->core_id;
 
     snprintf(eq_name, sizeof(eq_name), "eq[%d]", core_id);
     object_initialize_child_with_props(OBJECT(chip), eq_name, eq,
@@ -1983,7 +1983,7 @@ static void pnv_chip_core_realize(PnvChip *chip, Error **errp)
         chip->cores[i] = pnv_core;
         object_property_set_int(OBJECT(pnv_core), "nr-threads",
                                 chip->nr_threads, &error_fatal);
-        object_property_set_int(OBJECT(pnv_core), CPU_CORE_PROP_CORE_ID,
+        object_property_set_int(OBJECT(pnv_core), POWERPC_CORE_PROP_CORE_ID,
                                 core_hwid, &error_fatal);
         object_property_set_int(OBJECT(pnv_core), "pir",
                                 pcc->core_pir(chip, core_hwid), &error_fatal);
