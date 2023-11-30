@@ -55,7 +55,7 @@
  */
 
 #define TYPE_CPU_CLUSTER "cpu-cluster"
-OBJECT_DECLARE_SIMPLE_TYPE(CPUClusterState, CPU_CLUSTER)
+OBJECT_DECLARE_SIMPLE_TYPE(CPUCluster, CPU_CLUSTER)
 
 /*
  * This limit is imposed by TCG, which puts the cluster ID into an
@@ -64,13 +64,13 @@ OBJECT_DECLARE_SIMPLE_TYPE(CPUClusterState, CPU_CLUSTER)
 #define MAX_CLUSTERS 255
 
 /**
- * CPUClusterState:
+ * CPUCluster:
  * @cluster_id: The cluster ID. This value is for internal use only and should
  *   not be exposed directly to the user or to the guest.
  *
  * State of a CPU cluster.
  */
-struct CPUClusterState {
+struct CPUCluster {
     /*< private >*/
     DeviceState parent_obj;
 

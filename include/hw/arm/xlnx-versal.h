@@ -58,7 +58,7 @@ struct Versal {
     struct {
         struct {
             MemoryRegion mr;
-            CPUClusterState cluster;
+            CPUCluster cluster;
             ARMCPU cpu[XLNX_VERSAL_NR_ACPUS];
             GICv3State gic;
         } apu;
@@ -88,7 +88,7 @@ struct Versal {
             MemoryRegion mr;
             MemoryRegion mr_ps_alias;
 
-            CPUClusterState cluster;
+            CPUCluster cluster;
             ARMCPU cpu[XLNX_VERSAL_NR_RCPUS];
         } rpu;
 

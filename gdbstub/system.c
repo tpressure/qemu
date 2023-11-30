@@ -277,7 +277,7 @@ static int find_cpu_clusters(Object *child, void *opaque)
 {
     if (object_dynamic_cast(child, TYPE_CPU_CLUSTER)) {
         GDBState *s = (GDBState *) opaque;
-        CPUClusterState *cluster = CPU_CLUSTER(child);
+        CPUCluster *cluster = CPU_CLUSTER(child);
         GDBProcess *process;
 
         s->processes = g_renew(GDBProcess, s->processes, ++s->process_num);

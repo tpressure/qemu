@@ -26,12 +26,12 @@
 #include "qapi/error.h"
 
 static Property cpu_cluster_properties[] = {
-    DEFINE_PROP_UINT32("cluster-id", CPUClusterState, cluster_id, 0),
+    DEFINE_PROP_UINT32("cluster-id", CPUCluster, cluster_id, 0),
     DEFINE_PROP_END_OF_LIST()
 };
 
 typedef struct CallbackData {
-    CPUClusterState *cluster;
+    CPUCluster *cluster;
     int cpu_count;
 } CallbackData;
 
@@ -50,7 +50,7 @@ static int add_cpu_to_cluster(Object *obj, void *opaque)
 static void cpu_cluster_realize(DeviceState *dev, Error **errp)
 {
     /* Iterate through all our CPU children and set their cluster_index */
-    CPUClusterState *cluster = CPU_CLUSTER(dev);
+    CPUCluster *cluster = CPU_CLUSTER(dev);
     Object *cluster_obj = OBJECT(dev);
     CallbackData cbdata = {
         .cluster = cluster,
@@ -87,7 +87,7 @@ static void cpu_cluster_class_init(ObjectClass *klass, void *data)
 static const TypeInfo cpu_cluster_type_info = {
     .name = TYPE_CPU_CLUSTER,
     .parent = TYPE_DEVICE,
-    .instance_size = sizeof(CPUClusterState),
+    .instance_size = sizeof(CPUCluster),
     .class_init = cpu_cluster_class_init,
 };
 
