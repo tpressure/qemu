@@ -168,6 +168,23 @@ static void cpu_topo_update_info(CPUTopoState *topo, bool is_realize)
     }
 }
 
+static void cpu_topo_check_support(CPUTopoState *topo, Error **errp)
+{
+    CPUTopoState *parent = topo->parent;
+    CPUTopoClass *tc;
+
+    while (parent) {
+        tc = CPU_TOPO_GET_CLASS(parent);
+        if (tc->check_topo_child) {
+            tc->check_topo_child(parent, topo, errp);
+            if (*errp) {
+                return;
+            }
+        }
+        parent = parent->parent;
+    }
+}
+
 static void cpu_topo_set_parent(CPUTopoState *topo, Error **errp)
 {
     Object *obj = OBJECT(topo);
@@ -191,6 +208,11 @@ static void cpu_topo_set_parent(CPUTopoState *topo, Error **errp)
     }
 
     if (topo->parent) {
+        cpu_topo_check_support(topo, errp);
+        if (*errp) {
+            return;
+        }
+
         cpu_topo_build_hierarchy(topo, errp);
         if (*errp) {
             return;
