@@ -306,6 +306,98 @@ void x86_cpu_unplug_cb(HotplugHandler *hotplug_dev,
     error_propagate(errp, local_err);
 }
 
+static void x86_cpu_assign_apic_id(MachineState *ms, X86CPU *cpu,
+                                   X86CPUTopoIDs *topo_ids,
+                                   X86CPUTopoInfo *topo_info,
+                                   Error **errp)
+{
+    int max_socket = (ms->smp.max_cpus - 1) /
+                     ms->smp.threads / ms->smp.cores / ms->smp.dies;
+
+    /*
+     * die-id was optional in QEMU 4.0 and older, so keep it optional
+     * if there's only one die per socket.
+     */
+    if (cpu->die_id < 0 && ms->smp.dies == 1) {
+        cpu->die_id = 0;
+    }
+
+    if (cpu->socket_id < 0) {
+        error_setg(errp, "CPU socket-id is not set");
+        return;
+    } else if (cpu->socket_id > max_socket) {
+        error_setg(errp, "Invalid CPU socket-id: %u must be in range 0:%u",
+                   cpu->socket_id, max_socket);
+        return;
+    }
+    if (cpu->die_id < 0) {
+        error_setg(errp, "CPU die-id is not set");
+        return;
+    } else if (cpu->die_id > ms->smp.dies - 1) {
+        error_setg(errp, "Invalid CPU die-id: %u must be in range 0:%u",
+                   cpu->die_id, ms->smp.dies - 1);
+        return;
+    }
+    if (cpu->core_id < 0) {
+        error_setg(errp, "CPU core-id is not set");
+        return;
+    } else if (cpu->core_id > (ms->smp.cores - 1)) {
+        error_setg(errp, "Invalid CPU core-id: %u must be in range 0:%u",
+                   cpu->core_id, ms->smp.cores - 1);
+        return;
+    }
+    if (cpu->thread_id < 0) {
+        error_setg(errp, "CPU thread-id is not set");
+        return;
+    } else if (cpu->thread_id > (ms->smp.threads - 1)) {
+        error_setg(errp, "Invalid CPU thread-id: %u must be in range 0:%u",
+                   cpu->thread_id, ms->smp.threads - 1);
+        return;
+    }
+
+    topo_ids->pkg_id = cpu->socket_id;
+    topo_ids->die_id = cpu->die_id;
+    topo_ids->core_id = cpu->core_id;
+    topo_ids->smt_id = cpu->thread_id;
+    cpu->apic_id = x86_apicid_from_topo_ids(topo_info, topo_ids);
+}
+
+static void x86_cpu_assign_topo_id(X86CPU *cpu,
+                                   X86CPUTopoIDs *topo_ids,
+                                   Error **errp)
+{
+    if (cpu->socket_id != -1 && cpu->socket_id != topo_ids->pkg_id) {
+        error_setg(errp, "property socket-id: %u doesn't match set apic-id:"
+            " 0x%x (socket-id: %u)", cpu->socket_id, cpu->apic_id,
+            topo_ids->pkg_id);
+        return;
+    }
+    cpu->socket_id = topo_ids->pkg_id;
+
+    if (cpu->die_id != -1 && cpu->die_id != topo_ids->die_id) {
+        error_setg(errp, "property die-id: %u doesn't match set apic-id:"
+            " 0x%x (die-id: %u)", cpu->die_id, cpu->apic_id, topo_ids->die_id);
+        return;
+    }
+    cpu->die_id = topo_ids->die_id;
+
+    if (cpu->core_id != -1 && cpu->core_id != topo_ids->core_id) {
+        error_setg(errp, "property core-id: %u doesn't match set apic-id:"
+            " 0x%x (core-id: %u)", cpu->core_id, cpu->apic_id,
+            topo_ids->core_id);
+        return;
+    }
+    cpu->core_id = topo_ids->core_id;
+
+    if (cpu->thread_id != -1 && cpu->thread_id != topo_ids->smt_id) {
+        error_setg(errp, "property thread-id: %u doesn't match set apic-id:"
+            " 0x%x (thread-id: %u)", cpu->thread_id, cpu->apic_id,
+            topo_ids->smt_id);
+        return;
+    }
+    cpu->thread_id = topo_ids->smt_id;
+}
+
 void x86_cpu_pre_plug(HotplugHandler *hotplug_dev,
                       DeviceState *dev, Error **errp)
 {
@@ -317,8 +409,6 @@ void x86_cpu_pre_plug(HotplugHandler *hotplug_dev,
     CPUX86State *env = &cpu->env;
     MachineState *ms = MACHINE(hotplug_dev);
     X86MachineState *x86ms = X86_MACHINE(hotplug_dev);
-    unsigned int smp_cores = ms->smp.cores;
-    unsigned int smp_threads = ms->smp.threads;
     X86CPUTopoInfo topo_info;
 
     if (!object_dynamic_cast(OBJECT(cpu), ms->cpu_type)) {
@@ -347,55 +437,10 @@ void x86_cpu_pre_plug(HotplugHandler *hotplug_dev,
      * set it based on socket/die/core/thread properties.
      */
     if (cpu->apic_id == UNASSIGNED_APIC_ID) {
-        int max_socket = (ms->smp.max_cpus - 1) /
-                                smp_threads / smp_cores / ms->smp.dies;
-
-        /*
-         * die-id was optional in QEMU 4.0 and older, so keep it optional
-         * if there's only one die per socket.
-         */
-        if (cpu->die_id < 0 && ms->smp.dies == 1) {
-            cpu->die_id = 0;
-        }
-
-        if (cpu->socket_id < 0) {
-            error_setg(errp, "CPU socket-id is not set");
-            return;
-        } else if (cpu->socket_id > max_socket) {
-            error_setg(errp, "Invalid CPU socket-id: %u must be in range 0:%u",
-                       cpu->socket_id, max_socket);
+        x86_cpu_assign_apic_id(ms, cpu, &topo_ids, &topo_info, errp);
+        if (*errp) {
             return;
         }
-        if (cpu->die_id < 0) {
-            error_setg(errp, "CPU die-id is not set");
-            return;
-        } else if (cpu->die_id > ms->smp.dies - 1) {
-            error_setg(errp, "Invalid CPU die-id: %u must be in range 0:%u",
-                       cpu->die_id, ms->smp.dies - 1);
-            return;
-        }
-        if (cpu->core_id < 0) {
-            error_setg(errp, "CPU core-id is not set");
-            return;
-        } else if (cpu->core_id > (smp_cores - 1)) {
-            error_setg(errp, "Invalid CPU core-id: %u must be in range 0:%u",
-                       cpu->core_id, smp_cores - 1);
-            return;
-        }
-        if (cpu->thread_id < 0) {
-            error_setg(errp, "CPU thread-id is not set");
-            return;
-        } else if (cpu->thread_id > (smp_threads - 1)) {
-            error_setg(errp, "Invalid CPU thread-id: %u must be in range 0:%u",
-                       cpu->thread_id, smp_threads - 1);
-            return;
-        }
-
-        topo_ids.pkg_id = cpu->socket_id;
-        topo_ids.die_id = cpu->die_id;
-        topo_ids.core_id = cpu->core_id;
-        topo_ids.smt_id = cpu->thread_id;
-        cpu->apic_id = x86_apicid_from_topo_ids(&topo_info, &topo_ids);
     }
 
     cpu_slot = x86_find_cpu_slot(MACHINE(x86ms), cpu->apic_id, &idx);
@@ -422,36 +467,10 @@ void x86_cpu_pre_plug(HotplugHandler *hotplug_dev,
      * once -smp refactoring is complete and there will be CPU private
      * CPUState::nr_cores and CPUState::nr_threads fields instead of globals */
     x86_topo_ids_from_apicid(cpu->apic_id, &topo_info, &topo_ids);
-    if (cpu->socket_id != -1 && cpu->socket_id != topo_ids.pkg_id) {
-        error_setg(errp, "property socket-id: %u doesn't match set apic-id:"
-            " 0x%x (socket-id: %u)", cpu->socket_id, cpu->apic_id,
-            topo_ids.pkg_id);
+    x86_cpu_assign_topo_id(cpu, &topo_ids, errp);
+    if (*errp) {
         return;
     }
-    cpu->socket_id = topo_ids.pkg_id;
-
-    if (cpu->die_id != -1 && cpu->die_id != topo_ids.die_id) {
-        error_setg(errp, "property die-id: %u doesn't match set apic-id:"
-            " 0x%x (die-id: %u)", cpu->die_id, cpu->apic_id, topo_ids.die_id);
-        return;
-    }
-    cpu->die_id = topo_ids.die_id;
-
-    if (cpu->core_id != -1 && cpu->core_id != topo_ids.core_id) {
-        error_setg(errp, "property core-id: %u doesn't match set apic-id:"
-            " 0x%x (core-id: %u)", cpu->core_id, cpu->apic_id,
-            topo_ids.core_id);
-        return;
-    }
-    cpu->core_id = topo_ids.core_id;
-
-    if (cpu->thread_id != -1 && cpu->thread_id != topo_ids.smt_id) {
-        error_setg(errp, "property thread-id: %u doesn't match set apic-id:"
-            " 0x%x (thread-id: %u)", cpu->thread_id, cpu->apic_id,
-            topo_ids.smt_id);
-        return;
-    }
-    cpu->thread_id = topo_ids.smt_id;
 
     if (hyperv_feat_enabled(cpu, HYPERV_FEAT_VPINDEX) &&
         kvm_enabled() && !kvm_hv_vpindex_settable()) {
