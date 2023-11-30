@@ -559,3 +559,47 @@ bool machine_validate_cpu_topology(MachineState *ms, Error **errp)
 
     return true;
 }
+
+Object *cpu_slot_get_free_parent(CPUTopoState *child, Error **errp)
+{
+    MachineState *ms = MACHINE(qdev_get_machine());
+    MachineClass *mc = MACHINE_GET_CLASS(ms);
+    CPUTopoLevel level = CPU_TOPO_LEVEL(child);
+    CPUSlot *slot = ms->topo;
+
+    if (!slot) {
+        return NULL;
+    }
+
+    /*
+     * For CPUs and cores that support hotplug, the behavior is to specify
+     * some topology sub ids. This requires special handling.
+     */
+    if (level == mc->smp_props.possible_cpus_qom_granu) {
+        CPUTopoClass *child_tc = CPU_TOPO_GET_CLASS(child);
+
+        if (child_tc->search_parent_pre_plug) {
+            return child_tc->search_parent_pre_plug(child,
+                       CPU_TOPO(slot), errp);
+        }
+    }
+
+    /*
+     * For other topology devices, just collect them into CPU slot.
+     * The realize() of CPUTopoClass will check no "parent" option case.
+     */
+    return OBJECT(slot);
+}
+
+char *cpu_slot_name_future_child(CPUTopoState *child)
+{
+    MachineState *ms = MACHINE(qdev_get_machine());
+    CPUTopoLevel level = CPU_TOPO_LEVEL(child);
+    CPUSlot *slot = ms->topo;
+
+    if (!slot) {
+        return NULL;
+    }
+
+    return get_topo_global_name(&slot->stat, level);
+}

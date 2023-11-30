@@ -102,4 +102,7 @@ void machine_plug_cpu_slot(MachineState *ms);
 void machine_create_smp_topo_tree(MachineState *ms, Error **errp);
 bool machine_validate_cpu_topology(MachineState *ms, Error **errp);
 
+Object *cpu_slot_get_free_parent(CPUTopoState *child, Error **errp);
+char *cpu_slot_name_future_child(CPUTopoState *child);
+
 #endif /* CPU_SLOT_H */

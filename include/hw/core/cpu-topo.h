@@ -48,6 +48,8 @@ OBJECT_DECLARE_TYPE(CPUTopoState, CPUTopoClass, CPU_TOPO)
  *     new child (including direct child and non-direct child) is added.
  * @check_topo_child: Method to check the support for new child (including
  *     direct child and non-direct child) to be added.
+ * @search_parent_pre_plug: Method to search proper topology parent of @child
+ *     from @root.
  */
 struct CPUTopoClass {
     /*< private >*/
@@ -59,6 +61,8 @@ struct CPUTopoClass {
                              bool is_realize);
     void (*check_topo_child)(CPUTopoState *parent, CPUTopoState *child,
                              Error **errp);
+    Object *(*search_parent_pre_plug)(CPUTopoState *child, CPUTopoState *root,
+                                      Error **errp);
 };
 
 /**

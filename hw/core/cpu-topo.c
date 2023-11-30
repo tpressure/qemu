@@ -20,8 +20,10 @@
 
 #include "qemu/osdep.h"
 
+#include "hw/core/cpu-slot.h"
 #include "hw/core/cpu-topo.h"
 #include "hw/qdev-properties.h"
+#include "monitor/user-child.h"
 #include "qapi/error.h"
 
 const char *cpu_topo_level_to_string(CPUTopoLevel level)
@@ -272,10 +274,38 @@ static void cpu_topo_unrealize(DeviceState *dev)
     }
 }
 
+/*
+ * Prefer to insert topology device into topology tree where the CPU
+ * slot is the root.
+ */
+static Object *cpu_topo_get_parent(UserChild *uc, Error **errp)
+{
+    return cpu_slot_get_free_parent(CPU_TOPO(uc), errp);
+}
+
+static char *cpu_topo_get_child_name(UserChild *uc, Object *parent)
+{
+    return cpu_slot_name_future_child(CPU_TOPO(uc));
+}
+
+/* Only check type. Other topology details with be checked at realize(). */
+static bool cpu_topo_check_user_parent(UserChild *uc, Object *parent)
+{
+    CPUTopoState *topo;
+
+    topo = (CPUTopoState *)object_dynamic_cast(parent, TYPE_CPU_TOPO);
+    if (!topo) {
+        return false;
+    }
+
+    return true;
+}
+
 static void cpu_topo_class_init(ObjectClass *oc, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
     CPUTopoClass *tc = CPU_TOPO_CLASS(oc);
+    UserChildClass *ucc = USER_CHILD_CLASS(oc);
 
     /* All topology devices belong to CPU property. */
     set_bit(DEVICE_CATEGORY_CPU, dc->categories);
@@ -290,6 +320,10 @@ static void cpu_topo_class_init(ObjectClass *oc, void *data)
     dc->hotpluggable = false;
 
     tc->level = CPU_TOPO_UNKNOWN;
+
+    ucc->get_parent = cpu_topo_get_parent;
+    ucc->get_child_name = cpu_topo_get_child_name;
+    ucc->check_parent = cpu_topo_check_user_parent;
 }
 
 static void cpu_topo_instance_init(Object *obj)
@@ -310,6 +344,10 @@ static const TypeInfo cpu_topo_type_info = {
     .class_init = cpu_topo_class_init,
     .instance_size = sizeof(CPUTopoState),
     .instance_init = cpu_topo_instance_init,
+    .interfaces = (InterfaceInfo[]) {
+        { TYPE_USER_CHILD },
+        { }
+    }
 };
 
 static void cpu_topo_register_types(void)
