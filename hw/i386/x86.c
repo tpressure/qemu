@@ -95,7 +95,8 @@ uint32_t x86_cpu_apic_id_from_index(X86MachineState *x86ms,
 }
 
 
-void x86_cpu_new(X86MachineState *x86ms, int64_t apic_id, Error **errp)
+static void x86_cpu_new(X86MachineState *x86ms, int64_t apic_id,
+                        Error **errp)
 {
     Object *cpu = object_new(MACHINE(x86ms)->cpu_type);
 
