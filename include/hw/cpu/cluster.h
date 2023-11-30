@@ -20,6 +20,7 @@
 #ifndef HW_CPU_CLUSTER_H
 #define HW_CPU_CLUSTER_H
 
+#include "hw/core/cpu-topo.h"
 #include "hw/qdev-core.h"
 #include "qom/object.h"
 
@@ -84,11 +85,13 @@ struct TCGClusterOps {
 
 struct CPUClusterClass {
     /*< private >*/
-    DeviceClass parent_class;
+    CPUTopoClass parent_class;
 
     /*< public >*/
     /* when TCG is not available, this pointer is NULL */
     const struct TCGClusterOps *tcg_clu_ops;
+
+    DeviceRealize parent_realize;
 };
 
 /**
@@ -100,7 +103,7 @@ struct CPUClusterClass {
  */
 struct CPUCluster {
     /*< private >*/
-    DeviceState parent_obj;
+    CPUTopoState parent_obj;
 
     /*< public >*/
     uint32_t cluster_id;
