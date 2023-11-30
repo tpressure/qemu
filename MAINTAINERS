@@ -1862,6 +1862,7 @@ F: hw/core/machine.c
 F: hw/core/machine-smp.c
 F: hw/core/null-machine.c
 F: hw/core/numa.c
+F: hw/cpu/book.c
 F: hw/cpu/cluster.c
 F: hw/cpu/die.c
 F: hw/cpu/socket.c
@@ -1871,6 +1872,7 @@ F: qapi/machine-target.json
 F: include/hw/boards.h
 F: include/hw/core/cpu.h
 F: include/hw/core/cpu-topo.h
+F: include/hw/cpu/book.h
 F: include/hw/cpu/cluster.h
 F: include/hw/cpu/die.h
 F: include/hw/cpu/socket.h
