@@ -334,6 +334,7 @@ static void pnv_core_unrealize(DeviceState *dev)
 {
     PnvCore *pc = PNV_CORE(dev);
     CPUCore *cc = CPU_CORE(dev);
+    PnvCoreClass *pcc = PNV_CORE_GET_CLASS(pc);
     int i;
 
     qemu_unregister_reset(pnv_core_reset, pc);
@@ -342,6 +343,8 @@ static void pnv_core_unrealize(DeviceState *dev)
         pnv_core_cpu_unrealize(pc, pc->threads[i]);
     }
     g_free(pc->threads);
+
+    pcc->parent_unrealize(dev);
 }
 
 static Property pnv_core_properties[] = {
@@ -380,11 +383,12 @@ static void pnv_core_class_init(ObjectClass *oc, void *data)
     DeviceClass *dc = DEVICE_CLASS(oc);
     PnvCoreClass *pcc = PNV_CORE_CLASS(oc);
 
-    dc->unrealize = pnv_core_unrealize;
     device_class_set_props(dc, pnv_core_properties);
     dc->user_creatable = false;
     device_class_set_parent_realize(dc, pnv_core_realize,
                                     &pcc->parent_realize);
+    device_class_set_parent_unrealize(dc, pnv_core_unrealize,
+                                      &pcc->parent_unrealize);
 }
 
 #define DEFINE_PNV_CORE_TYPE(family, cpu_model) \

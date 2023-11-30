@@ -51,6 +51,7 @@ struct PnvCoreClass {
     uint64_t xscom_size;
 
     DeviceRealize parent_realize;
+    DeviceUnrealize parent_unrealize;
 };
 
 #define PNV_CORE_TYPE_SUFFIX "-" TYPE_PNV_CORE

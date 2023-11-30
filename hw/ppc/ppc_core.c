@@ -72,6 +72,11 @@ static void powerpc_core_class_init(ObjectClass *oc, void *data)
     DeviceClass *dc = DEVICE_CLASS(oc);
     PowerPCCoreClass *ppc_class = POWERPC_CORE_CLASS(oc);
 
+    /*
+     * PPC cores support hotplug and must be created after
+     * qemu_init_board().
+     */
+    clear_bit(DEVICE_CATEGORY_CPU_DEF, dc->categories);
     object_class_property_add(oc, "core-id", "int",
                               powerpc_core_prop_get_core_id,
                               powerpc_core_prop_set_core_id,

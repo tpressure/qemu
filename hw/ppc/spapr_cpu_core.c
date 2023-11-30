@@ -235,6 +235,7 @@ static void spapr_delete_vcpu(PowerPCCPU *cpu)
 static void spapr_cpu_core_unrealize(DeviceState *dev)
 {
     SpaprCpuCore *sc = SPAPR_CPU_CORE(OBJECT(dev));
+    SpaprCpuCoreClass *scc = SPAPR_CPU_CORE_GET_CLASS(sc);
     CPUCore *cc = CPU_CORE(dev);
     int i;
 
@@ -254,6 +255,8 @@ static void spapr_cpu_core_unrealize(DeviceState *dev)
     }
     g_free(sc->threads);
     qemu_unregister_reset(spapr_cpu_core_reset_handler, sc);
+
+    scc->parent_unrealize(dev);
 }
 
 static bool spapr_realize_vcpu(PowerPCCPU *cpu, SpaprMachineState *spapr,
@@ -366,12 +369,14 @@ static void spapr_cpu_core_class_init(ObjectClass *oc, void *data)
     DeviceClass *dc = DEVICE_CLASS(oc);
     SpaprCpuCoreClass *scc = SPAPR_CPU_CORE_CLASS(oc);
 
-    dc->unrealize = spapr_cpu_core_unrealize;
     dc->reset = spapr_cpu_core_reset;
     device_class_set_props(dc, spapr_cpu_core_properties);
+    dc->hotpluggable = true;
     scc->cpu_type = data;
     device_class_set_parent_realize(dc, spapr_cpu_core_realize,
                                     &scc->parent_realize);
+    device_class_set_parent_unrealize(dc, spapr_cpu_core_unrealize,
+                                      &scc->parent_unrealize);
 }
 
 #define DEFINE_SPAPR_CPU_CORE_TYPE(cpu_model) \

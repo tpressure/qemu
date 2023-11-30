@@ -10,15 +10,24 @@
 #define HW_CPU_CORE_H
 
 #include "hw/qdev-core.h"
+#include "hw/core/cpu-topo.h"
 #include "qom/object.h"
 
 #define TYPE_CPU_CORE "cpu-core"
 
-OBJECT_DECLARE_SIMPLE_TYPE(CPUCore, CPU_CORE)
+OBJECT_DECLARE_TYPE(CPUCore, CPUCoreClass, CPU_CORE)
+
+struct CPUCoreClass {
+    /*< private >*/
+    CPUTopoClass parent_class;
+
+    /*< public >*/
+    DeviceRealize parent_realize;
+};
 
 struct CPUCore {
     /*< private >*/
-    DeviceState parent_obj;
+    CPUTopoState parent_obj;
 
     /*< public >*/
     int core_id;
