@@ -460,16 +460,18 @@ void x86_cpu_pre_plug(HotplugHandler *hotplug_dev,
         return;
     }
 
-    /* if 'address' properties socket-id/core-id/thread-id are not set, set them
-     * so that machine_query_hotpluggable_cpus would show correct values
+    /*
+     * possible_cpus_qom_granu means the QOM topology support.
+     *
+     * TODO: Drop the "!mc->smp_props.possible_cpus_qom_granu" case when
+     * i386 completes QOM topology support.
      */
-    /* TODO: move socket_id/core_id/thread_id checks into x86_cpu_realizefn()
-     * once -smp refactoring is complete and there will be CPU private
-     * CPUState::nr_cores and CPUState::nr_threads fields instead of globals */
-    x86_topo_ids_from_apicid(cpu->apic_id, &topo_info, &topo_ids);
-    x86_cpu_assign_topo_id(cpu, &topo_ids, errp);
-    if (*errp) {
-        return;
+    if (!mc->smp_props.possible_cpus_qom_granu) {
+        x86_topo_ids_from_apicid(cpu->apic_id, &topo_info, &topo_ids);
+        x86_cpu_assign_topo_id(cpu, &topo_ids, errp);
+        if (*errp) {
+            return;
+        }
     }
 
     if (hyperv_feat_enabled(cpu, HYPERV_FEAT_VPINDEX) &&
@@ -482,6 +484,114 @@ void x86_cpu_pre_plug(HotplugHandler *hotplug_dev,
     cs->cpu_index = idx;
 
     numa_cpu_pre_plug(cpu_slot, dev, errp);
+}
+
+static int x86_cpu_get_topo_id_by_level(X86CPU *cpu,
+                                        CPUTopoLevel level)
+{
+    switch (level) {
+    case CPU_TOPO_THREAD:
+        return cpu->thread_id;
+    case CPU_TOPO_CORE:
+        return cpu->core_id;
+    case CPU_TOPO_DIE:
+        return cpu->die_id;
+    case CPU_TOPO_SOCKET:
+        return cpu->socket_id;
+    default:
+        g_assert_not_reached();
+    }
+
+    return -1;
+}
+
+typedef struct SearchCoreCb {
+    X86CPU *cpu;
+    CPUTopoState *parent;
+    int id;
+} SearchCoreCb;
+
+static int x86_cpu_search_parent_core(CPUTopoState *topo,
+                                      void *opaque)
+{
+    SearchCoreCb *cb = opaque;
+    CPUTopoLevel level = CPU_TOPO_LEVEL(topo);
+
+    cb->parent = topo;
+    cb->id = x86_cpu_get_topo_id_by_level(cb->cpu, level);
+
+    if (cb->id == topo->index) {
+        if (level == CPU_TOPO_CORE) {
+            return TOPO_FOREACH_END;
+        }
+        return TOPO_FOREACH_CONTINUE;
+    }
+    return TOPO_FOREACH_SIBLING;
+}
+
+Object *x86_cpu_search_parent_pre_plug(CPUTopoState *topo,
+                                       CPUTopoState *root,
+                                       Error **errp)
+{
+    int ret;
+    SearchCoreCb cb;
+    X86CPUTopoIDs topo_ids;
+    X86CPUTopoInfo topo_info;
+    X86CPU *cpu = X86_CPU(topo);
+    CPUSlot *slot = CPU_SLOT(root);
+    MachineState *ms = slot->ms;
+    DECLARE_BITMAP(foreach_bitmap, USER_AVAIL_LEVEL_NUM);
+
+    topo_info.dies_per_pkg = ms->smp.dies;
+    topo_info.cores_per_die = ms->smp.cores;
+    topo_info.threads_per_core = ms->smp.threads;
+
+    if (cpu->apic_id == UNASSIGNED_APIC_ID) {
+        x86_cpu_assign_apic_id(ms, cpu, &topo_ids, &topo_info, errp);
+        if (*errp) {
+            return NULL;
+        }
+    } else {
+        /*
+         * if 'address' properties socket-id/core-id/thread-id are not set,
+         * set them so that machine_query_hotpluggable_cpus would show
+         * correct values.
+         *
+         * TODO: move socket_id/core_id/thread_id checks into
+         * x86_cpu_realizefn() once -smp refactoring is complete and there
+         * will be CPU private CPUState::nr_cores and CPUState::nr_threads
+         * fields instead of globals.
+         */
+        x86_topo_ids_from_apicid(cpu->apic_id, &topo_info, &topo_ids);
+    }
+
+    x86_cpu_assign_topo_id(cpu, &topo_ids, errp);
+    if (*errp) {
+        return NULL;
+    }
+
+    cb.cpu = cpu;
+    cb.parent = NULL;
+    cb.id = -1;
+    bitmap_fill(foreach_bitmap, USER_AVAIL_LEVEL_NUM);
+    clear_bit(CPU_TOPO_UNKNOWN, foreach_bitmap);
+    clear_bit(CPU_TOPO_THREAD, foreach_bitmap);
+
+    ret = cpu_topo_child_foreach_recursive(root, foreach_bitmap,
+                                           x86_cpu_search_parent_core, &cb);
+    if (ret != TOPO_FOREACH_END) {
+        g_autofree char *search_info = NULL;
+
+        search_info = !cb.parent ? g_strdup("") :
+            g_strdup_printf(" for %s level with id: %d",
+            cpu_topo_level_to_string(CPU_TOPO_LEVEL(cb.parent)), cb.id);
+        error_setg(errp, "Can't find parent%s", search_info);
+        return NULL;
+    }
+
+    /* Keep the index of CPU topology device the same as the thread_id. */
+    topo->index = cpu->thread_id;
+    return OBJECT(cb.parent);
 }
 
 CpuInstanceProperties
