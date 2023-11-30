@@ -102,5 +102,6 @@ int cpu_topo_child_foreach(CPUTopoState *topo, unsigned long *levels,
 int cpu_topo_child_foreach_recursive(CPUTopoState *topo,
                                      unsigned long *levels,
                                      topo_fn fn, void *opaque);
+const char *cpu_topo_level_to_string(CPUTopoLevel level);
 
 #endif /* CPU_TOPO_H */

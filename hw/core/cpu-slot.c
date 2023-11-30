@@ -21,6 +21,7 @@
 #include "qemu/osdep.h"
 
 #include "hw/core/cpu-slot.h"
+#include "qapi/error.h"
 
 static inline
 CPUTopoStatEntry *get_topo_stat_entry(CPUTopoStat *stat,
@@ -94,6 +95,37 @@ static void cpu_slot_update_topo_info(CPUTopoState *root, CPUTopoState *child,
     }
 }
 
+static void cpu_slot_check_topo_support(CPUTopoState *root, CPUTopoState *child,
+                                        Error **errp)
+{
+    CPUSlot *slot = CPU_SLOT(root);
+    CPUTopoLevel child_level = CPU_TOPO_LEVEL(child);
+
+    if (!test_bit(child_level, slot->supported_levels)) {
+        error_setg(errp, "cpu topo: the level %s is not supported",
+                   cpu_topo_level_to_string(child_level));
+        return;
+    }
+
+    /*
+     * Currently we doesn't support hybrid topology. For SMP topology,
+     * each child under the same parent are same type.
+     */
+    if (child->parent->num_children) {
+        CPUTopoState *sibling = QTAILQ_FIRST(&child->parent->children);
+        const char *sibling_type = object_get_typename(OBJECT(sibling));
+        const char *child_type = object_get_typename(OBJECT(child));
+
+        if (strcmp(sibling_type, child_type)) {
+            error_setg(errp, "Invalid smp topology: different CPU "
+                       "topology types (%s child vs %s sibling) "
+                       "under the same parent (%s).",
+                       child_type, sibling_type,
+                       object_get_typename(OBJECT(child->parent)));
+        }
+    }
+}
+
 static void cpu_slot_class_init(ObjectClass *oc, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
@@ -104,6 +136,7 @@ static void cpu_slot_class_init(ObjectClass *oc, void *data)
 
     tc->level = CPU_TOPO_ROOT;
     tc->update_topo_info = cpu_slot_update_topo_info;
+    tc->check_topo_child = cpu_slot_check_topo_support;
 }
 
 static void cpu_slot_instance_init(Object *obj)
@@ -112,6 +145,10 @@ static void cpu_slot_instance_init(Object *obj)
 
     QTAILQ_INIT(&slot->cores);
     set_bit(CPU_TOPO_ROOT, slot->stat.curr_levels);
+
+    /* Set all levels by default. */
+    bitmap_fill(slot->supported_levels, USER_AVAIL_LEVEL_NUM);
+    clear_bit(CPU_TOPO_UNKNOWN, slot->supported_levels);
 }
 
 static const TypeInfo cpu_slot_type_info = {

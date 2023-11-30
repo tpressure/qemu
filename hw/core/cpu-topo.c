@@ -24,7 +24,7 @@
 #include "hw/qdev-properties.h"
 #include "qapi/error.h"
 
-static const char *cpu_topo_level_to_string(CPUTopoLevel level)
+const char *cpu_topo_level_to_string(CPUTopoLevel level)
 {
     switch (level) {
     case CPU_TOPO_UNKNOWN:

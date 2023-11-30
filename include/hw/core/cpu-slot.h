@@ -77,6 +77,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(CPUSlot, CPU_SLOT)
  *     queues for other topology levels to facilitate traversal
  *     when necessary.
  * @stat: Statistical topology information for topology tree.
+ * @supported_levels: Supported topology levels for topology tree.
  */
 struct CPUSlot {
     /*< private >*/
@@ -85,6 +86,7 @@ struct CPUSlot {
     /*< public >*/
     QTAILQ_HEAD(, CPUCore) cores;
     CPUTopoStat stat;
+    DECLARE_BITMAP(supported_levels, USER_AVAIL_LEVEL_NUM);
 };
 
 #endif /* CPU_SLOT_H */
