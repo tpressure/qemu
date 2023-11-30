@@ -44,6 +44,8 @@ OBJECT_DECLARE_TYPE(CPUTopoState, CPUTopoClass, CPU_TOPO)
 /**
  * CPUTopoClass:
  * @level: Topology level for this CPUTopoClass.
+ * @update_topo_info: Method to update topology information statistics when
+ *     new child (including direct child and non-direct child) is added.
  */
 struct CPUTopoClass {
     /*< private >*/
@@ -51,6 +53,8 @@ struct CPUTopoClass {
 
     /*< public >*/
     CPUTopoLevel level;
+    void (*update_topo_info)(CPUTopoState *parent, CPUTopoState *child,
+                             bool is_realize);
 };
 
 /**

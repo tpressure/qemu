@@ -154,6 +154,20 @@ static void cpu_topo_build_hierarchy(CPUTopoState *topo, Error **errp)
     cpu_topo_refresh_free_child_index(parent);
 }
 
+static void cpu_topo_update_info(CPUTopoState *topo, bool is_realize)
+{
+    CPUTopoState *parent = topo->parent;
+    CPUTopoClass *tc;
+
+    while (parent) {
+        tc = CPU_TOPO_GET_CLASS(parent);
+        if (tc->update_topo_info) {
+            tc->update_topo_info(parent, topo, is_realize);
+        }
+        parent = parent->parent;
+    }
+}
+
 static void cpu_topo_set_parent(CPUTopoState *topo, Error **errp)
 {
     Object *obj = OBJECT(topo);
@@ -178,6 +192,11 @@ static void cpu_topo_set_parent(CPUTopoState *topo, Error **errp)
 
     if (topo->parent) {
         cpu_topo_build_hierarchy(topo, errp);
+        if (*errp) {
+            return;
+        }
+
+        cpu_topo_update_info(topo, true);
     }
 }
 
@@ -203,6 +222,7 @@ static void cpu_topo_destroy_hierarchy(CPUTopoState *topo)
         return;
     }
 
+    cpu_topo_update_info(topo, false);
     QTAILQ_REMOVE(&parent->children, topo, sibling);
     parent->num_children--;
 
