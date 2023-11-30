@@ -24,6 +24,8 @@
 #include "hw/qdev-core.h"
 #include "qemu/queue.h"
 
+#define UNASSIGNED_TOPO_INDEX -1
+
 typedef enum CPUTopoLevel {
     CPU_TOPO_UNKNOWN,
     CPU_TOPO_THREAD,
@@ -53,6 +55,8 @@ struct CPUTopoClass {
 
 /**
  * CPUTopoState:
+ * @index: Topology index within parent's topology queue.
+ * @free_child_index: Cached free index to be specified for next child.
  * @num_children: Number of topology children under this topology device.
  * @max_children: Maximum number of children allowed to be inserted under
  *     this topology device.
@@ -66,6 +70,8 @@ struct CPUTopoState {
     DeviceState parent_obj;
 
     /*< public >*/
+    int index;
+    int free_child_index;
     int num_children;
     int max_children;
     CPUTopoLevel child_level;

@@ -50,6 +50,66 @@ static const char *cpu_topo_level_to_string(CPUTopoLevel level)
     return NULL;
 }
 
+static void cpu_topo_refresh_free_child_index(CPUTopoState *topo)
+{
+    CPUTopoState *child;
+
+    /*
+     * Fast way: Assume that the index grows sequentially and that there
+     * are no "index hole" in the previous children.
+     *
+     * The previous check on num_children ensures that free_child_index + 1
+     * does not hit the max_children limit.
+     */
+    if (topo->free_child_index + 1 == topo->num_children) {
+        topo->free_child_index++;
+        return;
+    }
+
+    /* Slow way: Search the "index hole". The index hole must be found. */
+    for (int index = 0; index < topo->num_children; index++) {
+        bool existed = false;
+
+        QTAILQ_FOREACH(child, &topo->children, sibling) {
+            if (child->index == index) {
+                existed = true;
+                break;
+            }
+        }
+
+        if (!existed) {
+            topo->free_child_index = index;
+            return;
+        }
+    }
+}
+
+static void cpu_topo_validate_index(CPUTopoState *topo, Error **errp)
+{
+    CPUTopoState *parent = topo->parent, *child;
+
+    if (topo->index < 0) {
+        error_setg(errp, "Invalid topology index (%d).",
+                   topo->index);
+        return;
+    }
+
+    if (parent->max_children && topo->index >= parent->max_children) {
+        error_setg(errp, "Invalid topology index (%d): "
+                   "The maximum index is %d.",
+                   topo->index, parent->max_children);
+        return;
+    }
+
+    QTAILQ_FOREACH(child, &topo->children, sibling) {
+        if (child->index == topo->index) {
+            error_setg(errp, "Duplicate topology index (%d)",
+                       topo->index);
+            return;
+        }
+    }
+}
+
 static void cpu_topo_build_hierarchy(CPUTopoState *topo, Error **errp)
 {
     CPUTopoState *parent = topo->parent;
@@ -80,7 +140,18 @@ static void cpu_topo_build_hierarchy(CPUTopoState *topo, Error **errp)
     }
 
     parent->num_children++;
+    if (topo->index == UNASSIGNED_TOPO_INDEX) {
+        topo->index = parent->free_child_index;
+    } else if (topo->index != parent->free_child_index) {
+        /* The index has been set, then we need to validate it. */
+        cpu_topo_validate_index(topo, errp);
+        if (*errp) {
+            return;
+        }
+    }
+
     QTAILQ_INSERT_TAIL(&parent->children, topo, sibling);
+    cpu_topo_refresh_free_child_index(parent);
 }
 
 static void cpu_topo_set_parent(CPUTopoState *topo, Error **errp)
@@ -135,6 +206,10 @@ static void cpu_topo_destroy_hierarchy(CPUTopoState *topo)
     QTAILQ_REMOVE(&parent->children, topo, sibling);
     parent->num_children--;
 
+    if (topo->index < parent->free_child_index) {
+        parent->free_child_index = topo->index;
+    }
+
     if (!parent->num_children) {
         parent->child_level = CPU_TOPO_UNKNOWN;
     }
@@ -180,6 +255,8 @@ static void cpu_topo_instance_init(Object *obj)
     CPUTopoState *topo = CPU_TOPO(obj);
     QTAILQ_INIT(&topo->children);
 
+    topo->index = UNASSIGNED_TOPO_INDEX;
+    topo->free_child_index = 0;
     topo->child_level = CPU_TOPO_UNKNOWN;
 }
 
