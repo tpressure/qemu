@@ -413,3 +413,149 @@ void machine_create_smp_topo_tree(MachineState *ms, Error **errp)
     }
     slot->smp_parsed = true;
 }
+
+static void set_smp_child_topo_info(CpuTopology *smp_info,
+                                    CPUTopoStat *stat,
+                                    CPUTopoLevel child_level)
+{
+    unsigned int *smp_count;
+    CPUTopoStatEntry *entry;
+
+    smp_count = get_smp_info_by_level(smp_info, child_level);
+    entry = get_topo_stat_entry(stat, child_level);
+    *smp_count = entry->max_units ? entry->max_units : 1;
+
+    return;
+}
+
+typedef struct ValidateCbData {
+    CPUTopoStat *stat;
+    CpuTopology *smp_info;
+    Error **errp;
+} ValidateCbData;
+
+static int validate_topo_children(CPUTopoState *topo, void *opaque)
+{
+    CPUTopoLevel level = CPU_TOPO_LEVEL(topo), next_level;
+    ValidateCbData *cb = opaque;
+    unsigned int max_children;
+    CPUTopoStatEntry *entry;
+    Error **errp = cb->errp;
+
+    if (level != CPU_TOPO_THREAD && !topo->num_children &&
+        !topo->max_children) {
+        error_setg(errp, "Invalid topology: the CPU topology "
+                   "(level: %s, index: %d) isn't completed.",
+                   cpu_topo_level_to_string(level), topo->index);
+        return TOPO_FOREACH_ERR;
+    }
+
+    if (level == CPU_TOPO_UNKNOWN) {
+        error_setg(errp, "Invalid CPU topology: unknown topology level.");
+        return TOPO_FOREACH_ERR;
+    }
+
+    /*
+     * Only CPU_TOPO_THREAD level's child_level could be CPU_TOPO_UNKNOWN,
+     * but machine_validate_cpu_topology() is before CPU creation.
+     */
+    if (topo->child_level == CPU_TOPO_UNKNOWN) {
+        error_setg(errp, "Invalid CPU topology: incomplete topology "
+                   "(level: %s, index: %d), no child?.",
+                   cpu_topo_level_to_string(level), topo->index);
+        return TOPO_FOREACH_ERR;
+    }
+
+    /*
+     * Currently hybrid topology isn't supported, so only SMP topology
+     * is allowed.
+     */
+
+    entry = get_topo_stat_entry(cb->stat, topo->child_level);
+
+    /* Max threads per core is pre-configured by "nr-threads". */
+    max_children = topo->child_level != CPU_TOPO_THREAD ?
+                   topo->num_children : topo->max_children;
+
+    if (entry->max_units != max_children) {
+        error_setg(errp, "Invalid SMP topology: "
+                   "The %s topology is asymmetric.",
+                   cpu_topo_level_to_string(level));
+        return TOPO_FOREACH_ERR;
+    }
+
+    next_level = find_next_bit(cb->stat->curr_levels, USER_AVAIL_LEVEL_NUM,
+                               topo->child_level + 1);
+
+    if (next_level != level) {
+        error_setg(errp, "Invalid smp topology: "
+                   "asymmetric CPU topology depth.");
+        return TOPO_FOREACH_ERR;
+    }
+
+    set_smp_child_topo_info(cb->smp_info, cb->stat, topo->child_level);
+
+    return TOPO_FOREACH_CONTINUE;
+}
+
+/*
+ * Only check the case user configures CPU topology via -device
+ * without -smp. In this case, MachineState.smp also needs to be
+ * initialized based on topology tree.
+ */
+bool machine_validate_cpu_topology(MachineState *ms, Error **errp)
+{
+    MachineClass *mc = MACHINE_GET_CLASS(ms);
+    CPUTopoState *slot_topo = CPU_TOPO(ms->topo);
+    CPUTopoStat *stat = &ms->topo->stat;
+    CpuTopology *smp_info = &ms->smp;
+    unsigned int total_cpus;
+    ValidateCbData cb;
+
+    if (ms->topo->smp_parsed) {
+        return true;
+    } else if (!slot_topo->num_children) {
+        /*
+         * If there's no -smp nor -device to add topology children,
+         * then create the default topology.
+         */
+        machine_create_smp_topo_tree(ms, errp);
+        if (*errp) {
+            return false;
+        }
+        return true;
+    }
+
+    if (test_bit(CPU_TOPO_CLUSTER, stat->curr_levels)) {
+        mc->smp_props.has_clusters = true;
+    }
+
+    /*
+     * The next cpu_topo_child_foreach_recursive() doesn't cover the
+     * parent topology unit. Update information for root here.
+     */
+    set_smp_child_topo_info(smp_info, stat, slot_topo->child_level);
+
+    cb.stat = stat;
+    cb.smp_info = smp_info;
+    cb.errp = errp;
+
+    cpu_topo_child_foreach_recursive(slot_topo, NULL,
+                                     validate_topo_children, &cb);
+    if (*errp) {
+        return false;
+    }
+
+    ms->smp.cpus = stat->pre_plugged_cpus ?
+                   stat->pre_plugged_cpus : 1;
+    ms->smp.max_cpus = stat->max_cpus ?
+                       stat->max_cpus : 1;
+
+    total_cpus = ms->smp.drawers * ms->smp.books *
+                 ms->smp.sockets * ms->smp.dies *
+                 ms->smp.clusters * ms->smp.cores *
+                 ms->smp.threads;
+    g_assert(total_cpus == ms->smp.max_cpus);
+
+    return true;
+}

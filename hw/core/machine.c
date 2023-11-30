@@ -1505,6 +1505,16 @@ void machine_run_board_init(MachineState *machine, const char *mem_path, Error *
                                    "on", false);
     }
 
+    /*
+     * TODO: drop this check and validate topology tree by default
+     * when all arches support QOM topology.
+     */
+    if (machine_class->smp_props.possible_cpus_qom_granu) {
+        if (!machine_validate_cpu_topology(machine, errp)) {
+            return;
+        }
+    }
+
     accel_init_interfaces(ACCEL_GET_CLASS(machine->accelerator));
     machine_class->init(machine);
     phase_advance(PHASE_MACHINE_INITIALIZED);
