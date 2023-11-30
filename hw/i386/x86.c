@@ -152,9 +152,35 @@ void x86_cpus_init(X86MachineState *x86ms, int default_cpu_version)
     }
 
     possible_cpus = mc->possible_cpu_arch_ids(ms);
-    for (i = 0; i < ms->smp.cpus; i++) {
-        x86_cpu_new(x86ms, possible_cpus->cpus[i].arch_id,
-                    NULL, i, &error_fatal);
+
+    /*
+     * possible_cpus_qom_granu means the QOM topology support.
+     *
+     * TODO: Drop the "!mc->smp_props.possible_cpus_qom_granu" case when
+     * i386 completes QOM topology support.
+     */
+    if (mc->smp_props.possible_cpus_qom_granu) {
+        CPUCore *core;
+        int cpu_index = 0;
+        int core_idx = 0;
+
+        MACHINE_CORE_FOREACH(ms, core) {
+            for (i = 0; i < core->plugged_threads; i++) {
+                x86_cpu_new(x86ms, possible_cpus->cpus[cpu_index].arch_id,
+                            OBJECT(core), cpu_index, &error_fatal);
+                cpu_index++;
+            }
+
+            if (core->plugged_threads < core->nr_threads) {
+                cpu_index += core->nr_threads - core->plugged_threads;
+            }
+            core_idx++;
+        }
+    } else {
+        for (i = 0; i < ms->smp.cpus; i++) {
+            x86_cpu_new(x86ms, possible_cpus->cpus[i].arch_id,
+                        NULL, i, &error_fatal);
+        }
     }
 }
 
