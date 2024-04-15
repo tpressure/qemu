@@ -437,6 +437,8 @@ int kvm_init_vcpu(CPUState *cpu, Error **errp)
         }
     }
 
+    /** XXX: always transfer complete register state */
+    cpu->kvm_run->kvm_dirty_regs |= KVM_SYNC_X86_VALID_FIELDS;
     ret = kvm_arch_init_vcpu(cpu);
     if (ret < 0) {
         error_setg_errno(errp, -ret,
@@ -2867,6 +2869,9 @@ int kvm_cpu_exec(CPUState *cpu)
         smp_rmb();
 
         run_ret = kvm_vcpu_ioctl(cpu, KVM_RUN, 0);
+
+        /** XXX: always mark registers as dirty */
+        cpu->kvm_run->kvm_dirty_regs |= KVM_SYNC_X86_VALID_FIELDS;
 
         attrs = kvm_arch_post_run(cpu, run);
 
