@@ -250,6 +250,10 @@ int qemu_gettimeofday(qemu_timeval *tp)
   return 0;
 }
 
+void qemu_clear_cloexec(int fd)
+{
+}
+
 int qemu_get_thread_id(void)
 {
     return GetCurrentThreadId();
