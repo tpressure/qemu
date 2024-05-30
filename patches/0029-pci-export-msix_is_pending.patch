@@ -1,0 +1,43 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 29/46] pci: export msix_is_pending
+Date: Tue, 26 Jul 2022 09:10:26 -0700
+
+Export msix_is_pending for use by cpr.  No functional change.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+Acked-by: Michael S. Tsirkin <mst@redhat.com>
+---
+ hw/pci/msix.c         | 2 +-
+ include/hw/pci/msix.h | 1 +
+ 2 files changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/hw/pci/msix.c b/hw/pci/msix.c
+index 1e381a9..f642a43 100644
+--- a/hw/pci/msix.c
++++ b/hw/pci/msix.c
+@@ -69,7 +69,7 @@ static uint8_t *msix_pending_byte(PCIDevice *dev, int vector)
+     return dev->msix_pba + vector / 8;
+ }
+ 
+-static int msix_is_pending(PCIDevice *dev, int vector)
++int msix_is_pending(PCIDevice *dev, unsigned int vector)
+ {
+     return *msix_pending_byte(dev, vector) & msix_pending_mask(vector);
+ }
+diff --git a/include/hw/pci/msix.h b/include/hw/pci/msix.h
+index 4f1cda0..f2f2d85 100644
+--- a/include/hw/pci/msix.h
++++ b/include/hw/pci/msix.h
+@@ -32,6 +32,7 @@ int msix_present(PCIDevice *dev);
+ bool msix_is_masked(PCIDevice *dev, unsigned vector);
+ void msix_set_pending(PCIDevice *dev, unsigned vector);
+ void msix_clr_pending(PCIDevice *dev, int vector);
++int msix_is_pending(PCIDevice *dev, unsigned vector);
+ 
+ int msix_vector_use(PCIDevice *dev, unsigned vector);
+ void msix_vector_unuse(PCIDevice *dev, unsigned vector);
+-- 
+1.8.3.1
+
+
+

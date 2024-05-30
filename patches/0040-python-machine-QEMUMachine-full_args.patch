@@ -1,0 +1,35 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 40/46] python/machine: QEMUMachine full_args
+Date: Tue, 26 Jul 2022 09:10:37 -0700
+
+Provide full_args() to return all command-line arguments used to start a
+vm, some of which are not otherwise visible to QEMUMachine clients.  This
+is needed by the cpr test, which must start a vm, then pass all qemu
+command-line arguments when setting the cpr-exec-args migration parameter.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ python/qemu/machine/machine.py | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/python/qemu/machine/machine.py b/python/qemu/machine/machine.py
+index 37191f4..d05950e 100644
+--- a/python/qemu/machine/machine.py
++++ b/python/qemu/machine/machine.py
+@@ -332,6 +332,11 @@ def args(self) -> List[str]:
+         """Returns the list of arguments given to the QEMU binary."""
+         return self._args
+ 
++    @property
++    def full_args(self) -> List[str]:
++        """Returns the full list of arguments used to launch QEMU."""
++        return list(self._qemu_full_args)
++
+     def _pre_launch(self) -> None:
+         if self._console_set:
+             self._remove_files.append(self._console_address)
+-- 
+1.8.3.1
+
+
+

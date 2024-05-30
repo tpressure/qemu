@@ -1,0 +1,81 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 44/46] migration: fix suspended runstate
+Date: Tue, 26 Jul 2022 09:10:41 -0700
+
+Migration of a guest in the suspended state is broken.  The incoming
+migration code automatically tries to wake the guest, which IMO is
+wrong -- the guest should end migration in the same state it started.
+Further, the wakeup attempt merely sets state to running but does
+not actually start the guest, as vm_start was never called during this
+invocation of qemu.
+
+To fix, leave the guest in the suspended state, but call
+qemu_system_start_on_wakeup_request() so the guest is properly resumed
+when the client sends a system_wakeup command.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ migration/migration.c | 11 ++++-------
+ softmmu/runstate.c    |  1 +
+ 2 files changed, 5 insertions(+), 7 deletions(-)
+
+diff --git a/migration/migration.c b/migration/migration.c
+index e0fc2b8..45eebea 100644
+--- a/migration/migration.c
++++ b/migration/migration.c
+@@ -568,6 +568,10 @@ static void process_incoming_migration_bh(void *opaque)
+         vm_start();
+     } else {
+         runstate_set(global_state_get_runstate());
++        if (runstate_check(RUN_STATE_SUSPENDED)) {
++            /* Force vm_start to be called later. */
++            qemu_system_start_on_wakeup_request();
++        }
+     }
+     /*
+      * This must happen after any state changes since as soon as an external
+@@ -3273,7 +3277,6 @@ static int postcopy_start(MigrationState *ms)
+     qemu_mutex_lock_iothread();
+     trace_postcopy_start_set_run();
+ 
+-    qemu_system_wakeup_request(QEMU_WAKEUP_REASON_OTHER, NULL);
+     global_state_store();
+     ret = vm_stop_force_state(RUN_STATE_FINISH_MIGRATE);
+     if (ret < 0) {
+@@ -3484,7 +3487,6 @@ static void migration_completion(MigrationState *s)
+     if (s->state == MIGRATION_STATUS_ACTIVE) {
+         qemu_mutex_lock_iothread();
+         s->downtime_start = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
+-        qemu_system_wakeup_request(QEMU_WAKEUP_REASON_OTHER, NULL);
+         s->vm_was_running = runstate_is_running();
+         ret = global_state_store();
+ 
+@@ -4285,11 +4287,6 @@ static void *bg_migration_thread(void *opaque)
+ 
+     qemu_mutex_lock_iothread();
+ 
+-    /*
+-     * If VM is currently in suspended state, then, to make a valid runstate
+-     * transition in vm_stop_force_state() we need to wakeup it up.
+-     */
+-    qemu_system_wakeup_request(QEMU_WAKEUP_REASON_OTHER, NULL);
+     s->vm_was_running = runstate_is_running();
+ 
+     if (global_state_store()) {
+diff --git a/softmmu/runstate.c b/softmmu/runstate.c
+index c7db5ac..6ba0a4e 100644
+--- a/softmmu/runstate.c
++++ b/softmmu/runstate.c
+@@ -154,6 +154,7 @@ static const RunStateTransition runstate_transitions_def[] = {
+     { RUN_STATE_RUNNING, RUN_STATE_SUSPENDED },
+     { RUN_STATE_SUSPENDED, RUN_STATE_RUNNING },
+     { RUN_STATE_SUSPENDED, RUN_STATE_FINISH_MIGRATE },
++    { RUN_STATE_SUSPENDED, RUN_STATE_PAUSED },
+     { RUN_STATE_SUSPENDED, RUN_STATE_PRELAUNCH },
+     { RUN_STATE_SUSPENDED, RUN_STATE_COLO},
+ 
+-- 
+1.8.3.1
+
+
+

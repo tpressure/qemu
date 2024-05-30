@@ -1,0 +1,201 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 08/46] cpr: relax some blockers
+Date: Tue, 26 Jul 2022 09:10:05 -0700
+
+Some devices block migration because they rely on local state that
+is not migrated to the target host, such as for local filesystems.
+These need not block cpr, which will restart qemu on the same host.
+Narrow the scope of these blockers so they only apply to normal mode.
+They will not block cpr modes when they are added in subsequent patches.
+
+No functional change until a new mode is added.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ backends/tpm/tpm_emulator.c | 3 ++-
+ block/parallels.c           | 3 ++-
+ block/qcow.c                | 3 ++-
+ block/vdi.c                 | 3 ++-
+ block/vhdx.c                | 3 ++-
+ block/vmdk.c                | 3 ++-
+ block/vpc.c                 | 3 ++-
+ block/vvfat.c               | 3 ++-
+ hw/9pfs/9p.c                | 3 ++-
+ hw/scsi/vhost-scsi.c        | 3 ++-
+ hw/virtio/vhost.c           | 3 ++-
+ target/i386/nvmm/nvmm-all.c | 3 ++-
+ 12 files changed, 24 insertions(+), 12 deletions(-)
+
+diff --git a/backends/tpm/tpm_emulator.c b/backends/tpm/tpm_emulator.c
+index ed67633..18cac1b 100644
+--- a/backends/tpm/tpm_emulator.c
++++ b/backends/tpm/tpm_emulator.c
+@@ -492,7 +492,8 @@ static int tpm_emulator_block_migration(TPMEmulator *tpm_emu)
+         error_setg(&tpm_emu->migration_blocker,
+                    "Migration disabled: TPM emulator does not support "
+                    "migration");
+-        if (migrate_add_blocker(&tpm_emu->migration_blocker, &err) < 0) {
++        if (migrate_add_blockers(&tpm_emu->migration_blocker, &err,
++                                 MIG_MODE_NORMAL, -1) < 0) {
+             error_report_err(err);
+             return -1;
+         }
+diff --git a/block/parallels.c b/block/parallels.c
+index 25d24d6..0837c32 100644
+--- a/block/parallels.c
++++ b/block/parallels.c
+@@ -878,7 +878,8 @@ static int parallels_open(BlockDriverState *bs, QDict *options, int flags,
+     error_setg(&s->migration_blocker, "The Parallels format used by node '%s' "
+                "does not support live migration",
+                bdrv_get_device_or_node_name(bs));
+-    ret = migrate_add_blocker(&s->migration_blocker, errp);
++    ret = migrate_add_blockers(&s->migration_blocker, errp, MIG_MODE_NORMAL,
++                               -1);
+     if (ret < 0) {
+         goto fail;
+     }
+diff --git a/block/qcow.c b/block/qcow.c
+index 3b4e6a4..4057438 100644
+--- a/block/qcow.c
++++ b/block/qcow.c
+@@ -305,7 +305,8 @@ static int qcow_open(BlockDriverState *bs, QDict *options, int flags,
+     error_setg(&s->migration_blocker, "The qcow format used by node '%s' "
+                "does not support live migration",
+                bdrv_get_device_or_node_name(bs));
+-    ret = migrate_add_blocker(&s->migration_blocker, errp);
++    ret = migrate_add_blockers(&s->migration_blocker, errp, MIG_MODE_NORMAL,
++                               -1);
+     if (ret < 0) {
+         goto fail;
+     }
+diff --git a/block/vdi.c b/block/vdi.c
+index cead854..022dab5 100644
+--- a/block/vdi.c
++++ b/block/vdi.c
+@@ -495,7 +495,8 @@ static int vdi_open(BlockDriverState *bs, QDict *options, int flags,
+     error_setg(&s->migration_blocker, "The vdi format used by node '%s' "
+                "does not support live migration",
+                bdrv_get_device_or_node_name(bs));
+-    ret = migrate_add_blocker(&s->migration_blocker, errp);
++    ret = migrate_add_blockers(&s->migration_blocker, errp, MIG_MODE_NORMAL,
++                               -1);
+     if (ret < 0) {
+         goto fail_free_bmap;
+     }
+diff --git a/block/vhdx.c b/block/vhdx.c
+index 07b6077..8564777 100644
+--- a/block/vhdx.c
++++ b/block/vhdx.c
+@@ -1093,7 +1093,8 @@ static int vhdx_open(BlockDriverState *bs, QDict *options, int flags,
+     error_setg(&s->migration_blocker, "The vhdx format used by node '%s' "
+                "does not support live migration",
+                bdrv_get_device_or_node_name(bs));
+-    ret = migrate_add_blocker(&s->migration_blocker, errp);
++    ret = migrate_add_blockers(&s->migration_blocker, errp, MIG_MODE_NORMAL,
++                              -1);
+     if (ret < 0) {
+         goto fail;
+     }
+diff --git a/block/vmdk.c b/block/vmdk.c
+index 7a7cb57..043b895 100644
+--- a/block/vmdk.c
++++ b/block/vmdk.c
+@@ -1360,7 +1360,8 @@ static int vmdk_open(BlockDriverState *bs, QDict *options, int flags,
+     error_setg(&s->migration_blocker, "The vmdk format used by node '%s' "
+                "does not support live migration",
+                bdrv_get_device_or_node_name(bs));
+-    ret = migrate_add_blocker(&s->migration_blocker, errp);
++    ret = migrate_add_blockers(&s->migration_blocker, errp, MIG_MODE_NORMAL,
++                               -1);
+     if (ret < 0) {
+         goto fail;
+     }
+diff --git a/block/vpc.c b/block/vpc.c
+index a465784..6a25e2d 100644
+--- a/block/vpc.c
++++ b/block/vpc.c
+@@ -450,7 +450,8 @@ static int vpc_open(BlockDriverState *bs, QDict *options, int flags,
+     error_setg(&s->migration_blocker, "The vpc format used by node '%s' "
+                "does not support live migration",
+                bdrv_get_device_or_node_name(bs));
+-    ret = migrate_add_blocker(&s->migration_blocker, errp);
++    ret = migrate_add_blockers(&s->migration_blocker, errp, MIG_MODE_NORMAL,
++                               -1);
+     if (ret < 0) {
+         goto fail;
+     }
+diff --git a/block/vvfat.c b/block/vvfat.c
+index bc96876..45f3280 100644
+--- a/block/vvfat.c
++++ b/block/vvfat.c
+@@ -1265,7 +1265,8 @@ static int vvfat_open(BlockDriverState *bs, QDict *options, int flags,
+                    "The vvfat (rw) format used by node '%s' "
+                    "does not support live migration",
+                    bdrv_get_device_or_node_name(bs));
+-        ret = migrate_add_blocker(&s->migration_blocker, errp);
++        ret = migrate_add_blockers(&s->migration_blocker, errp, MIG_MODE_NORMAL,
++                                   -1);
+         if (ret < 0) {
+             goto fail;
+         }
+diff --git a/hw/9pfs/9p.c b/hw/9pfs/9p.c
+index d5ac01f..3a48f32 100644
+--- a/hw/9pfs/9p.c
++++ b/hw/9pfs/9p.c
+@@ -1487,7 +1487,8 @@ static void coroutine_fn v9fs_attach(void *opaque)
+         error_setg(&s->migration_blocker,
+                    "Migration is disabled when VirtFS export path '%s' is mounted in the guest using mount_tag '%s'",
+                    s->ctx.fs_root ? s->ctx.fs_root : "NULL", s->tag);
+-        err = migrate_add_blocker(&s->migration_blocker, NULL);
++        err = migrate_add_blockers(&s->migration_blocker, NULL, MIG_MODE_NORMAL,
++                                   -1);
+         if (err < 0) {
+             clunk_fid(s, fid);
+             goto out;
+diff --git a/hw/scsi/vhost-scsi.c b/hw/scsi/vhost-scsi.c
+index b5e34f2..4a9d711 100644
+--- a/hw/scsi/vhost-scsi.c
++++ b/hw/scsi/vhost-scsi.c
+@@ -208,7 +208,8 @@ static void vhost_scsi_realize(DeviceState *dev, Error **errp)
+                 "When external environment supports it (Orchestrator migrates "
+                 "target SCSI device state or use shared storage over network), "
+                 "set 'migratable' property to true to enable migration.");
+-        if (migrate_add_blocker(&vsc->migration_blocker, errp) < 0) {
++        if (migrate_add_blockers(&vsc->migration_blocker, errp, MIG_MODE_NORMAL,
++                                 -1) < 0) {
+             goto free_virtio;
+         }
+     }
+diff --git a/hw/virtio/vhost.c b/hw/virtio/vhost.c
+index ae52b62..8d2a136 100644
+--- a/hw/virtio/vhost.c
++++ b/hw/virtio/vhost.c
+@@ -1431,7 +1431,8 @@ int vhost_dev_init(struct vhost_dev *hdev, void *opaque,
+     }
+ 
+     if (hdev->migration_blocker != NULL) {
+-        r = migrate_add_blocker(&hdev->migration_blocker, errp);
++        r = migrate_add_blockers(&hdev->migration_blocker, errp,
++                                 MIG_MODE_NORMAL, -1);
+         if (r < 0) {
+             goto fail_busyloop;
+         }
+diff --git a/target/i386/nvmm/nvmm-all.c b/target/i386/nvmm/nvmm-all.c
+index f66b140..e102f64 100644
+--- a/target/i386/nvmm/nvmm-all.c
++++ b/target/i386/nvmm/nvmm-all.c
+@@ -935,7 +935,8 @@ nvmm_init_vcpu(CPUState *cpu)
+         error_setg(&nvmm_migration_blocker,
+             "NVMM: Migration not supported");
+ 
+-        if (migrate_add_blocker(&nvmm_migration_blocker, &local_error) < 0) {
++        if (migrate_add_blockers(&nvmm_migration_blocker, &local_error,
++                                 MIG_MODE_NORMAL, -1) < 0) {
+             error_report_err(local_error);
+             return -EINVAL;
+         }
+-- 
+1.8.3.1
+
+
+

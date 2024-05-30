@@ -1,0 +1,76 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 19/46] oslib: qemu_clear_cloexec
+Date: Tue, 26 Jul 2022 09:10:16 -0700
+Content-Type: text/plain; charset=UTF-8
+
+Define qemu_clear_cloexec, analogous to qemu_set_cloexec.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+Reviewed-by: Dr. David Alan Gilbert <dgilbert@redhat.com>
+Reviewed-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+---
+ include/qemu/osdep.h | 9 +++++++++
+ util/oslib-posix.c   | 9 +++++++++
+ util/oslib-win32.c   | 4 ++++
+ 3 files changed, 22 insertions(+)
+
+diff --git a/include/qemu/osdep.h b/include/qemu/osdep.h
+index b1c161c..015c764 100644
+--- a/include/qemu/osdep.h
++++ b/include/qemu/osdep.h
+@@ -549,6 +549,15 @@ ssize_t qemu_write_full(int fd, const void *buf, size_t count)
+ 
+ void qemu_set_cloexec(int fd);
+ 
++/*
++ * Clear FD_CLOEXEC for a descriptor.
++ *
++ * The caller must guarantee that no other fork+exec's occur before the
++ * exec that is intended to inherit this descriptor, eg by suspending CPUs
++ * and blocking monitor commands.
++ */
++void qemu_clear_cloexec(int fd);
++
+ /* Return a dynamically allocated directory path that is appropriate for storing
+  * local state.
+  *
+diff --git a/util/oslib-posix.c b/util/oslib-posix.c
+index bffec18..7990aab 100644
+--- a/util/oslib-posix.c
++++ b/util/oslib-posix.c
+@@ -257,6 +257,15 @@ void qemu_set_cloexec(int fd)
+     assert(f != -1);
+ }
+ 
++void qemu_clear_cloexec(int fd)
++{
++    int f;
++    f = fcntl(fd, F_GETFD);
++    assert(f != -1);
++    f = fcntl(fd, F_SETFD, f & ~FD_CLOEXEC);
++    assert(f != -1);
++}
++
+ char *
+ qemu_get_local_state_dir(void)
+ {
+diff --git a/util/oslib-win32.c b/util/oslib-win32.c
+index 5723d3e..5bed148 100644
+--- a/util/oslib-win32.c
++++ b/util/oslib-win32.c
+@@ -226,6 +226,10 @@ void qemu_set_cloexec(int fd)
+ {
+ }
+ 
++void qemu_clear_cloexec(int fd)
++{
++}
++
+ int qemu_get_thread_id(void)
+ {
+     return GetCurrentThreadId();
+-- 
+1.8.3.1
+
+
+

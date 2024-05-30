@@ -1,0 +1,101 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 10/46] qdev-properties: strList
+Date: Tue, 26 Jul 2022 09:10:07 -0700
+
+Define a list-of-strings property, to be used for the cpr-exec-args
+migration property in a subsequent patch.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ hw/core/qdev-properties.c    | 44 ++++++++++++++++++++++++++++++++++++++++++++
+ include/hw/qdev-properties.h |  3 +++
+ 2 files changed, 47 insertions(+)
+
+diff --git a/hw/core/qdev-properties.c b/hw/core/qdev-properties.c
+index 357b876..851f490 100644
+--- a/hw/core/qdev-properties.c
++++ b/hw/core/qdev-properties.c
+@@ -9,6 +9,7 @@
+ #include "qemu/units.h"
+ #include "qemu/cutils.h"
+ #include "qdev-prop-internal.h"
++#include "qapi/qapi-builtin-visit.h"
+ 
+ void qdev_prop_set_after_realize(DeviceState *dev, const char *name,
+                                   Error **errp)
+@@ -490,6 +491,49 @@ const PropertyInfo qdev_prop_string = {
+     .set   = set_string,
+ };
+ 
++/* --- strList --- */
++
++static void release_strList(Object *obj, const char *name, void *opaque)
++{
++    Property *prop = opaque;
++    g_free(*(char **)object_field_prop_ptr(obj, prop));
++}
++
++static void get_strList(Object *obj, Visitor *v, const char *name,
++                       void *opaque, Error **errp)
++{
++    Property *prop = opaque;
++    strList **ptr = object_field_prop_ptr(obj, prop);
++
++    if (!*ptr) {
++        strList *str = NULL;
++        visit_type_strList(v, name, &str, errp);
++    } else {
++        visit_type_strList(v, name, ptr, errp);
++    }
++}
++
++static void set_strList(Object *obj, Visitor *v, const char *name,
++                       void *opaque, Error **errp)
++{
++    Property *prop = opaque;
++    strList **ptr = object_field_prop_ptr(obj, prop);
++    strList *str;
++
++    if (!visit_type_strList(v, name, &str, errp)) {
++        return;
++    }
++    g_free(*ptr);
++    *ptr = str;
++}
++
++const PropertyInfo qdev_prop_strlist = {
++    .name  = "strList",
++    .release = release_strList,
++    .get   = get_strList,
++    .set   = set_strList,
++};
++
+ /* --- on/off/auto --- */
+ 
+ const PropertyInfo qdev_prop_on_off_auto = {
+diff --git a/include/hw/qdev-properties.h b/include/hw/qdev-properties.h
+index e1df088..df1b869 100644
+--- a/include/hw/qdev-properties.h
++++ b/include/hw/qdev-properties.h
+@@ -59,6 +59,7 @@ extern const PropertyInfo qdev_prop_uint64_checkmask;
+ extern const PropertyInfo qdev_prop_int64;
+ extern const PropertyInfo qdev_prop_size;
+ extern const PropertyInfo qdev_prop_string;
++extern const PropertyInfo qdev_prop_strlist;
+ extern const PropertyInfo qdev_prop_on_off_auto;
+ extern const PropertyInfo qdev_prop_size32;
+ extern const PropertyInfo qdev_prop_arraylen;
+@@ -171,6 +172,8 @@ extern const PropertyInfo qdev_prop_link;
+     DEFINE_PROP_UNSIGNED(_n, _s, _f, _d, qdev_prop_size, uint64_t)
+ #define DEFINE_PROP_STRING(_n, _s, _f)             \
+     DEFINE_PROP(_n, _s, _f, qdev_prop_string, char*)
++#define DEFINE_PROP_STRLIST(_n, _s, _f)             \
++    DEFINE_PROP(_n, _s, _f, qdev_prop_strlist, strList*)
+ #define DEFINE_PROP_ON_OFF_AUTO(_n, _s, _f, _d) \
+     DEFINE_PROP_SIGNED(_n, _s, _f, _d, qdev_prop_on_off_auto, OnOffAuto)
+ #define DEFINE_PROP_SIZE32(_n, _s, _f, _d)                       \
+-- 
+1.8.3.1
+
+
+

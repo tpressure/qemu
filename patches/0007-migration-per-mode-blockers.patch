@@ -1,0 +1,271 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 07/46] migration: per-mode blockers
+Date: Tue, 26 Jul 2022 09:10:04 -0700
+
+Extend the blocker interface so that a blocker can be registered for
+one or more migration modes.  The existing interfaces register a
+blocker for all modes, and the new interfaces take a varargs list
+of modes.
+
+Internally, maintain a separate blocker list per mode.  The same Error
+object may be added to multiple lists.  When a block is deleted, it is
+removed from every list, and the Error is freed.
+
+No functional change until a new mode is added.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ include/migration/blocker.h | 45 ++++++++++++++++++++---
+ migration/migration.c       | 87 +++++++++++++++++++++++++++++++++++++++------
+ stubs/migr-blocker.c        |  5 +++
+ 3 files changed, 123 insertions(+), 14 deletions(-)
+
+diff --git a/include/migration/blocker.h b/include/migration/blocker.h
+index 1483f5d..1a21937 100644
+--- a/include/migration/blocker.h
++++ b/include/migration/blocker.h
+@@ -14,8 +14,12 @@
+ #ifndef MIGRATION_BLOCKER_H
+ #define MIGRATION_BLOCKER_H
+ 
++#include "qapi/qapi-types-migration.h"
++
++#define MIG_MODE_ALL MIG_MODE__MAX
++
+ /**
+- * @migrate_add_blocker - prevent migration from proceeding
++ * @migrate_add_blocker - prevent all modes of migration from proceeding
+  *
+  * @reasonp - address of an error to be returned whenever migration is attempted
+  *
+@@ -29,8 +33,41 @@
+ int migrate_add_blocker(Error **reasonp, Error **errp);
+ 
+ /**
++ * @migrate_add_blockers - prevent migration for specified modes from proceeding
++ *
++ * @reasonp - address of an error to be returned whenever migration is attempted
++ *
++ * @errp - [out] The reason (if any) we cannot block migration right now.
++ *
++ * @mode - one or more migration modes to be blocked.  The list is terminated
++ *         by -1 or MIG_MODE_ALL.  For the latter, all modes are blocked.
++ *
++ * @returns - 0 on success, -EBUSY/-EACCES on failure, with errp set.
++ *
++ * *@reasonp is freed and set to NULL if failure is returned.
++ * On success, the caller must not free *@reasonp before the blocker is removed.
++ */
++int migrate_add_blockers(Error **reasonp, Error **errp, MigMode mode, ...);
++
++/**
++ * @migrate_add_blocker_always - permanently prevent migration for specified
++ *  modes from proceeding.  The blocker cannot be deleted.
++ *
++ * @msg - text of error to be returned whenever migration is attempted
++ *
++ * @errp - [out] The reason (if any) we cannot block migration right now.
++ *
++ * @mode - one or more migration modes to be blocked.  The list is terminated
++ *         by -1 or MIG_MODE_ALL.  For the latter, all modes are blocked.
++ *
++ * @returns - 0 on success, -EBUSY/-EACCES on failure, with errp set.
++ */
++int
++migrate_add_blocker_always(const char *msg, Error **errp, MigMode mode, ...);
++
++/**
+  * @migrate_add_blocker_internal - prevent migration from proceeding without
+- *                                 only-migrate implications
++ *                                 only-migrate implications, for all modes
+  *
+  * @reasonp - address of an error to be returned whenever migration is attempted
+  *
+@@ -48,7 +85,7 @@ int migrate_add_blocker(Error **reasonp, Error **errp);
+ int migrate_add_blocker_internal(Error **reasonp, Error **errp);
+ 
+ /**
+- * @migrate_del_blocker - remove a blocking error from migration and free it.
++ * @migrate_del_blocker - remove a migration blocker for all modes and free it.
+  *
+  * @reasonp - address of the error blocking migration
+  *
+@@ -57,7 +94,7 @@ int migrate_add_blocker_internal(Error **reasonp, Error **errp);
+ void migrate_del_blocker(Error **reasonp);
+ 
+ /**
+- * @migrate_remove_blocker - remove a migration blocker.
++ * @migrate_remove_blocker - remove a migration blocker for all modes.
+  *
+  * @reason - the error blocking migration
+  *
+diff --git a/migration/migration.c b/migration/migration.c
+index 0d3bed5..0e62227 100644
+--- a/migration/migration.c
++++ b/migration/migration.c
+@@ -175,7 +175,7 @@ static MigrationState *current_migration;
+ static MigrationIncomingState *current_incoming;
+ static int migrate_enabled_modes = BIT(MIG_MODE_NORMAL);
+ 
+-static GSList *migration_blockers;
++static GSList *migration_blockers[MIG_MODE__MAX];
+ 
+ static bool migration_object_check(MigrationState *ms, Error **errp);
+ static int migration_maybe_pause(MigrationState *s,
+@@ -1123,7 +1123,7 @@ static void fill_source_migration_info(MigrationInfo *info)
+ {
+     MigrationState *s = migrate_get_current();
+     int state = qatomic_read(&s->state);
+-    GSList *cur_blocker = migration_blockers;
++    GSList *cur_blocker = migration_blockers[migrate_mode()];
+ 
+     info->blocked_reasons = NULL;
+ 
+@@ -2198,8 +2198,10 @@ void migrate_init(MigrationState *s)
+     s->threshold_size = 0;
+ }
+ 
+-int migrate_add_blocker_internal(Error **reasonp, Error **errp)
++static int add_blockers(Error **reasonp, Error **errp, int modes)
+ {
++    MigMode mode;
++
+     /* Snapshots are similar to migrations, so check RUN_STATE_SAVE_VM too. */
+     if (runstate_check(RUN_STATE_SAVE_VM) || !migration_is_idle()) {
+         error_propagate_prepend(errp, *reasonp,
+@@ -2209,13 +2211,20 @@ int migrate_add_blocker_internal(Error **reasonp, Error **errp)
+         return -EBUSY;
+     }
+ 
+-    migration_blockers = g_slist_prepend(migration_blockers, *reasonp);
++    for (mode = 0; mode < MIG_MODE__MAX; mode++) {
++        if (modes & BIT(mode)) {
++            migration_blockers[mode] = g_slist_prepend(migration_blockers[mode],
++                                                       *reasonp);
++        }
++    }
+     return 0;
+ }
+ 
+-int migrate_add_blocker(Error **reasonp, Error **errp)
++static int check_blockers(Error **reasonp, Error **errp, int modes)
+ {
+-    if (only_migratable) {
++    ERRP_GUARD();
++
++    if (only_migratable && (modes & BIT(MIG_MODE_NORMAL))) {
+         error_propagate_prepend(errp, *reasonp,
+                                 "disallowing migration blocker "
+                                 "(--only-migratable) for: ");
+@@ -2223,7 +2232,60 @@ int migrate_add_blocker(Error **reasonp, Error **errp)
+         return -EACCES;
+     }
+ 
+-    return migrate_add_blocker_internal(reasonp, errp);
++    return add_blockers(reasonp, errp, modes);
++}
++
++int migrate_add_blocker(Error **reasonp, Error **errp)
++{
++    return migrate_add_blockers(reasonp, errp, MIG_MODE_ALL);
++}
++
++int migrate_add_blocker_internal(Error **reasonp, Error **errp)
++{
++    int modes = BIT(MIG_MODE__MAX) - 1;
++
++    return add_blockers(reasonp, errp, modes);
++}
++
++static int get_modes(MigMode mode, va_list ap)
++{
++    int modes = 0;
++
++    while (mode != -1 && mode != MIG_MODE_ALL) {
++        assert(mode >= MIG_MODE_NORMAL && mode < MIG_MODE__MAX);
++        modes |= BIT(mode);
++        mode = va_arg(ap, MigMode);
++    }
++    if (mode == MIG_MODE_ALL) {
++        modes = BIT(MIG_MODE__MAX) - 1;
++    }
++    return modes;
++}
++
++int migrate_add_blockers(Error **reasonp, Error **errp, MigMode mode, ...)
++{
++    int modes;
++    va_list ap;
++
++    va_start(ap, mode);
++    modes = get_modes(mode, ap);
++    va_end(ap);
++
++    return check_blockers(reasonp, errp, modes);
++}
++
++int migrate_add_blocker_always(const char *msg, Error **errp, MigMode mode, ...)
++{
++    int modes;
++    va_list ap;
++    Error *reason = NULL;
++
++    va_start(ap, mode);
++    modes = get_modes(mode, ap);
++    va_end(ap);
++
++    error_setg(&reason, "%s", msg);
++    return check_blockers(&reason, errp, modes);
+ }
+ 
+ void migrate_del_blocker(Error **reasonp)
+@@ -2238,7 +2300,10 @@ void migrate_del_blocker(Error **reasonp)
+ void migrate_remove_blocker(Error *reason)
+ {
+     if (reason) {
+-        migration_blockers = g_slist_remove(migration_blockers, reason);
++        for (MigMode mode = 0; mode < MIG_MODE__MAX; mode++) {
++            migration_blockers[mode] = g_slist_remove(migration_blockers[mode],
++                                                      reason);
++        }
+     }
+ }
+ 
+@@ -2333,12 +2398,14 @@ void qmp_migrate_pause(Error **errp)
+ 
+ bool migration_is_blocked(Error **errp)
+ {
++    GSList *blockers = migration_blockers[migrate_mode()];
++
+     if (qemu_savevm_state_blocked(errp)) {
+         return true;
+     }
+ 
+-    if (migration_blockers) {
+-        error_propagate(errp, error_copy(migration_blockers->data));
++    if (blockers) {
++        error_propagate(errp, error_copy(blockers->data));
+         return true;
+     }
+ 
+diff --git a/stubs/migr-blocker.c b/stubs/migr-blocker.c
+index 17a5dbf..60769d8 100644
+--- a/stubs/migr-blocker.c
++++ b/stubs/migr-blocker.c
+@@ -6,6 +6,11 @@ int migrate_add_blocker(Error **reasonp, Error **errp)
+     return 0;
+ }
+ 
++int migrate_add_blockers(Error **reasonp, Error **errp, MigMode mode, ...)
++{
++    return 0;
++}
++
+ void migrate_del_blocker(Error **reasonp)
+ {
+ }
+-- 
+1.8.3.1
+
+
+

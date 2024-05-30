@@ -1,0 +1,272 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 04/46] migration: mode parameter
+Date: Tue, 26 Jul 2022 09:10:01 -0700
+
+Create a mode migration parameter that can be used to select alternate
+migration algorithms.  The default mode is normal, representing the
+current migration algorithm, and does not need to be explicitly set.
+
+No functional change until a new mode is added, except that the mode is
+shown by the 'info migrate' command.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ hw/core/qdev-properties-system.c    | 12 ++++++++++++
+ include/hw/qdev-properties-system.h |  4 ++++
+ include/migration/misc.h            |  4 ++++
+ migration/migration.c               | 28 ++++++++++++++++++++++++++++
+ monitor/hmp-cmds.c                  |  8 ++++++++
+ qapi/migration.json                 | 28 +++++++++++++++++++++++++---
+ 6 files changed, 81 insertions(+), 3 deletions(-)
+
+diff --git a/hw/core/qdev-properties-system.c b/hw/core/qdev-properties-system.c
+index a91f605..0a7b25b 100644
+--- a/hw/core/qdev-properties-system.c
++++ b/hw/core/qdev-properties-system.c
+@@ -650,6 +650,18 @@ const PropertyInfo qdev_prop_multifd_compression = {
+     .set_default_value = qdev_propinfo_set_default_value_enum,
+ };
+ 
++/* --- MigMode --- */
++
++const PropertyInfo qdev_prop_mig_mode = {
++    .name = "MigMode",
++    .description = "mig_mode values, "
++                   "normal/exec",
++    .enum_table = &MigMode_lookup,
++    .get = qdev_propinfo_get_enum,
++    .set = qdev_propinfo_set_enum,
++    .set_default_value = qdev_propinfo_set_default_value_enum,
++};
++
+ /* --- Reserved Region --- */
+ 
+ /*
+diff --git a/include/hw/qdev-properties-system.h b/include/hw/qdev-properties-system.h
+index 0ac327a..1418801 100644
+--- a/include/hw/qdev-properties-system.h
++++ b/include/hw/qdev-properties-system.h
+@@ -7,6 +7,7 @@ extern const PropertyInfo qdev_prop_chr;
+ extern const PropertyInfo qdev_prop_macaddr;
+ extern const PropertyInfo qdev_prop_reserved_region;
+ extern const PropertyInfo qdev_prop_multifd_compression;
++extern const PropertyInfo qdev_prop_mig_mode;
+ extern const PropertyInfo qdev_prop_losttickpolicy;
+ extern const PropertyInfo qdev_prop_blockdev_on_error;
+ extern const PropertyInfo qdev_prop_bios_chs_trans;
+@@ -41,6 +42,9 @@ extern const PropertyInfo qdev_prop_pcie_link_width;
+ #define DEFINE_PROP_MULTIFD_COMPRESSION(_n, _s, _f, _d) \
+     DEFINE_PROP_SIGNED(_n, _s, _f, _d, qdev_prop_multifd_compression, \
+                        MultiFDCompression)
++#define DEFINE_PROP_MIG_MODE(_n, _s, _f, _d) \
++    DEFINE_PROP_SIGNED(_n, _s, _f, _d, qdev_prop_mig_mode, \
++                       MigMode)
+ #define DEFINE_PROP_LOSTTICKPOLICY(_n, _s, _f, _d) \
+     DEFINE_PROP_SIGNED(_n, _s, _f, _d, qdev_prop_losttickpolicy, \
+                         LostTickPolicy)
+diff --git a/include/migration/misc.h b/include/migration/misc.h
+index 4659067..1e01134 100644
+--- a/include/migration/misc.h
++++ b/include/migration/misc.h
+@@ -15,6 +15,7 @@
+ #define MIGRATION_MISC_H
+ 
+ #include "qemu/notify.h"
++#include "qapi/qapi-types-migration.h"
+ #include "qapi/qapi-types-net.h"
+ 
+ /* migration/ram.c */
+@@ -75,4 +76,7 @@ bool migration_in_bg_snapshot(void);
+ /* migration/block-dirty-bitmap.c */
+ void dirty_bitmap_mig_init(void);
+ 
++MigMode migrate_mode(void);
++MigMode migrate_mode_of(MigrationState *s);
++
+ #endif
+diff --git a/migration/migration.c b/migration/migration.c
+index d1cfca1..38584db 100644
+--- a/migration/migration.c
++++ b/migration/migration.c
+@@ -904,6 +904,8 @@ MigrationParameters *qmp_query_migrate_parameters(Error **errp)
+ 
+     /* TODO use QAPI_CLONE() instead of duplicating it inline */
+     params = g_malloc0(sizeof(*params));
++    params->has_mode = true;
++    params->mode = s->parameters.mode;
+     params->has_compress_level = true;
+     params->compress_level = s->parameters.compress_level;
+     params->has_compress_threads = true;
+@@ -1576,6 +1578,10 @@ static void migrate_params_test_apply(MigrateSetParameters *params,
+ 
+     /* TODO use QAPI_CLONE() instead of duplicating it inline */
+ 
++    if (params->has_mode) {
++        dest->mode = params->mode;
++    }
++
+     if (params->has_compress_level) {
+         dest->compress_level = params->compress_level;
+     }
+@@ -1673,6 +1679,10 @@ static void migrate_params_apply(MigrateSetParameters *params, Error **errp)
+ 
+     /* TODO use QAPI_CLONE() instead of duplicating it inline */
+ 
++    if (params->has_mode) {
++        s->parameters.mode = params->mode;
++    }
++
+     if (params->has_compress_level) {
+         s->parameters.compress_level = params->compress_level;
+     }
+@@ -2663,6 +2673,20 @@ int migrate_use_tls(void)
+     return s->parameters.tls_creds && *s->parameters.tls_creds;
+ }
+ 
++MigMode migrate_mode(void)
++{
++    MigrationState *s;
++
++    s = migrate_get_current();
++
++    return s->parameters.mode;
++}
++
++MigMode migrate_mode_of(MigrationState *s)
++{
++    return s->parameters.mode;
++}
++
+ int migrate_use_xbzrle(void)
+ {
+     MigrationState *s;
+@@ -4321,6 +4345,9 @@ static Property migration_properties[] = {
+                       clear_bitmap_shift, CLEAR_BITMAP_SHIFT_DEFAULT),
+ 
+     /* Migration parameters */
++    DEFINE_PROP_MIG_MODE("mode", MigrationState,
++                      parameters.mode,
++                      MIG_MODE_NORMAL),
+     DEFINE_PROP_UINT8("x-compress-level", MigrationState,
+                       parameters.compress_level,
+                       DEFAULT_MIGRATE_COMPRESS_LEVEL),
+@@ -4454,6 +4481,7 @@ static void migration_instance_init(Object *obj)
+     params->tls_creds = g_strdup("");
+ 
+     /* Set has_* up only for parameter checks */
++    params->has_mode = true;
+     params->has_compress_level = true;
+     params->has_compress_threads = true;
+     params->has_decompress_threads = true;
+diff --git a/monitor/hmp-cmds.c b/monitor/hmp-cmds.c
+index c6cd6f9..6632ada 100644
+--- a/monitor/hmp-cmds.c
++++ b/monitor/hmp-cmds.c
+@@ -431,6 +431,10 @@ void hmp_info_migrate_parameters(Monitor *mon, const QDict *qdict)
+         monitor_printf(mon, "%s: %" PRIu64 " ms\n",
+             MigrationParameter_str(MIGRATION_PARAMETER_ANNOUNCE_STEP),
+             params->announce_step);
++        assert(params->has_mode);
++        monitor_printf(mon, "%s: %s\n",
++            MigrationParameter_str(MIGRATION_PARAMETER_MODE),
++            qapi_enum_lookup(&MigMode_lookup, params->mode));
+         assert(params->has_compress_level);
+         monitor_printf(mon, "%s: %u\n",
+             MigrationParameter_str(MIGRATION_PARAMETER_COMPRESS_LEVEL),
+@@ -1219,6 +1223,10 @@ void hmp_migrate_set_parameter(Monitor *mon, const QDict *qdict)
+     }
+ 
+     switch (val) {
++    case MIGRATION_PARAMETER_MODE:
++        p->has_mode = true;
++        visit_type_MigMode(v, param, &p->mode, &err);
++        break;
+     case MIGRATION_PARAMETER_COMPRESS_LEVEL:
+         p->has_compress_level = true;
+         visit_type_uint8(v, param, &p->compress_level, &err);
+diff --git a/qapi/migration.json b/qapi/migration.json
+index 81185d4..931c492 100644
+--- a/qapi/migration.json
++++ b/qapi/migration.json
+@@ -568,6 +568,16 @@
+             { 'name': 'zstd', 'if': 'CONFIG_ZSTD' } ] }
+ 
+ ##
++# @MigMode:
++#
++# @normal: the original form of migration.
++#
++# Since: 7.1
++##
++{ 'enum': 'MigMode',
++  'data': [ 'normal' ] }
++
++##
+ # @BitmapMigrationBitmapAliasTransform:
+ #
+ # @persistent: If present, the bitmap will be made persistent
+@@ -627,6 +637,9 @@
+ #
+ # Migration parameters enumeration
+ #
++# @mode: Migration mode. See description in @MigMode. Default is 'normal'.
++#        (Since 7.1)
++#
+ # @announce-initial: Initial delay (in milliseconds) before sending the first
+ #                    announce (Since 4.0)
+ #
+@@ -782,7 +795,8 @@
+ # Since: 2.4
+ ##
+ { 'enum': 'MigrationParameter',
+-  'data': ['announce-initial', 'announce-max',
++  'data': ['mode',
++           'announce-initial', 'announce-max',
+            'announce-rounds', 'announce-step',
+            'compress-level', 'compress-threads', 'decompress-threads',
+            'compress-wait-thread', 'throttle-trigger-threshold',
+@@ -801,6 +815,9 @@
+ ##
+ # @MigrateSetParameters:
+ #
++# @mode: Migration mode. See description in @MigMode. Default is 'normal'.
++#        (Since 7.1)
++#
+ # @announce-initial: Initial delay (in milliseconds) before sending the first
+ #                    announce (Since 4.0)
+ #
+@@ -949,7 +966,8 @@
+ # TODO either fuse back into MigrationParameters, or make
+ # MigrationParameters members mandatory
+ { 'struct': 'MigrateSetParameters',
+-  'data': { '*announce-initial': 'size',
++  'data': { '*mode': 'MigMode',
++            '*announce-initial': 'size',
+             '*announce-max': 'size',
+             '*announce-rounds': 'size',
+             '*announce-step': 'size',
+@@ -999,6 +1017,9 @@
+ #
+ # The optional members aren't actually optional.
+ #
++# @mode: Migration mode. See description in @MigMode. Default is 'normal'.
++#        (Since 7.1)
++#
+ # @announce-initial: Initial delay (in milliseconds) before sending the
+ #                    first announce (Since 4.0)
+ #
+@@ -1147,7 +1168,8 @@
+ # Since: 2.4
+ ##
+ { 'struct': 'MigrationParameters',
+-  'data': { '*announce-initial': 'size',
++  'data': { '*mode': 'MigMode',
++            '*announce-initial': 'size',
+             '*announce-max': 'size',
+             '*announce-rounds': 'size',
+             '*announce-step': 'size',
+-- 
+1.8.3.1
+
+
+

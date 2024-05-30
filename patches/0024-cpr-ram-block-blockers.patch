@@ -1,0 +1,137 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 24/46] cpr: ram block blockers
+Date: Tue, 26 Jul 2022 09:10:21 -0700
+
+Unlike cpr-reboot mode, cpr-exec mode cannot save volatile ram blocks in the
+migration stream file and recreate them later, because the physical memory for
+the blocks is pinned and registered for vfio.  Add an exec-mode blocker for
+volatile ram blocks.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ include/exec/memory.h   |  2 ++
+ include/exec/ramblock.h |  1 +
+ softmmu/physmem.c       | 45 +++++++++++++++++++++++++++++++++++++++++++++
+ softmmu/vl.c            |  2 ++
+ 4 files changed, 50 insertions(+)
+
+diff --git a/include/exec/memory.h b/include/exec/memory.h
+index 9629289..128bf3e 100644
+--- a/include/exec/memory.h
++++ b/include/exec/memory.h
+@@ -3039,6 +3039,8 @@ bool ram_block_discard_is_disabled(void);
+  */
+ bool ram_block_discard_is_required(void);
+ 
++void ram_block_add_cpr_blockers(Error **errp);
++
+ #endif
+ 
+ #endif
+diff --git a/include/exec/ramblock.h b/include/exec/ramblock.h
+index 6cbedf9..a5cbd9e 100644
+--- a/include/exec/ramblock.h
++++ b/include/exec/ramblock.h
+@@ -39,6 +39,7 @@ struct RAMBlock {
+     /* RCU-enabled, writes protected by the ramlist lock */
+     QLIST_ENTRY(RAMBlock) next;
+     QLIST_HEAD(, RAMBlockNotifier) ramblock_notifiers;
++    Error *cpr_blocker;
+     int fd;
+     size_t page_size;
+     /* dirty bitmap used during migration */
+diff --git a/softmmu/physmem.c b/softmmu/physmem.c
+index 29baa0f..ac0ae25 100644
+--- a/softmmu/physmem.c
++++ b/softmmu/physmem.c
+@@ -67,6 +67,7 @@
+ 
+ #include "qemu/pmem.h"
+ 
++#include "migration/blocker.h"
+ #include "migration/cpr-state.h"
+ #include "migration/misc.h"
+ #include "migration/vmstate.h"
+@@ -1979,6 +1980,49 @@ static bool memory_region_is_backend(MemoryRegion *mr)
+     return !!object_dynamic_cast(OBJECT(mr)->parent, TYPE_MEMORY_BACKEND);
+ }
+ 
++/*
++ * Return true if ram contents would be lost during cpr for MIG_MODE_CPR_EXEC.
++ * Return false for ram_device because it is remapped after exec.  Do not
++ * exclude rom, even though it is readonly, because the rom file could change
++ * in the new qemu.  Return false for non-migratable blocks.  They are either
++ * re-created after exec, or are handled specially, or are covered by a
++ * device-level cpr blocker.  Return false for an fd, because it is visible and
++ * can be remapped in the new process.
++ */
++static bool ram_is_volatile(RAMBlock *rb)
++{
++    MemoryRegion *mr = rb->mr;
++
++    return mr &&
++        memory_region_is_ram(mr) &&
++        !memory_region_is_ram_device(mr) &&
++        (!qemu_ram_is_shared(rb) || !ramblock_is_named_file(rb)) &&
++        qemu_ram_is_migratable(rb) &&
++        rb->fd < 0;
++}
++
++/*
++ * Add a MIG_MODE_CPR_EXEC blocker for each volatile ram block.  This cannot be
++ * performed in ram_block_add because the migratable flag has not been set yet.
++ * No need to examine anonymous (non-backend) blocks, because they are
++ * created using memfd if cpr-exec mode is enabled.
++ */
++void ram_block_add_cpr_blockers(Error **errp)
++{
++    RAMBlock *rb;
++
++    RAMBLOCK_FOREACH(rb) {
++        if (ram_is_volatile(rb) && memory_region_is_backend(rb->mr)) {
++            const char *name = memory_region_name(rb->mr);
++            rb->cpr_blocker = NULL;
++            error_setg(&rb->cpr_blocker,
++                    "Memory region %s is volatile. A memory-backend-memfd or"
++                    " memory-backend-file with share=on is required.", name);
++            migrate_add_blockers(&rb->cpr_blocker, errp, MIG_MODE_CPR_EXEC, -1);
++        }
++    }
++}
++
+ static void *qemu_anon_memfd_alloc(RAMBlock *rb, size_t maxlen, Error **errp)
+ {
+     size_t len, align;
+@@ -2285,6 +2329,7 @@ void qemu_ram_free(RAMBlock *block)
+ 
+     qemu_mutex_lock_ramlist();
+     cpr_delete_memfd(memory_region_name(block->mr));
++    migrate_del_blocker(&block->cpr_blocker);
+     QLIST_REMOVE_RCU(block, next);
+     ram_list.mru_block = NULL;
+     /* Write list before version */
+diff --git a/softmmu/vl.c b/softmmu/vl.c
+index 83f3be0..5f6cd8c 100644
+--- a/softmmu/vl.c
++++ b/softmmu/vl.c
+@@ -28,6 +28,7 @@
+ #include "qemu/units.h"
+ #include "exec/cpu-common.h"
+ #include "exec/page-vary.h"
++#include "exec/memory.h"
+ #include "hw/qdev-properties.h"
+ #include "qapi/compat-policy.h"
+ #include "qapi/error.h"
+@@ -2589,6 +2590,7 @@ void qmp_x_exit_preconfig(Error **errp)
+     qemu_init_board();
+     qemu_create_cli_devices();
+     qemu_machine_creation_done();
++    ram_block_add_cpr_blockers(&error_fatal);
+ 
+     if (loadvm) {
+         load_snapshot(loadvm, NULL, false, NULL, &error_fatal);
+-- 
+1.8.3.1
+
+
+

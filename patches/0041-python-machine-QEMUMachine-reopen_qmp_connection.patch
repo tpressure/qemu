@@ -1,0 +1,37 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 41/46] python/machine: QEMUMachine reopen_qmp_connection
+Date: Tue, 26 Jul 2022 09:10:38 -0700
+
+Provide reopen_qmp_connection() to reopen a closed monitor connection.
+This is needed by cpr, because qemu exec closes the monitor socket.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ python/qemu/machine/machine.py | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/python/qemu/machine/machine.py b/python/qemu/machine/machine.py
+index d05950e..60b934d 100644
+--- a/python/qemu/machine/machine.py
++++ b/python/qemu/machine/machine.py
+@@ -491,6 +491,15 @@ def _close_qmp_connection(self) -> None:
+         finally:
+             self._qmp_connection = None
+ 
++    def reopen_qmp_connection(self):
++        self._close_qmp_connection()
++        self._qmp_connection = QEMUMonitorProtocol(
++            self._monitor_address,
++            server=True,
++            nickname=self._name
++        )
++        self._qmp.accept(self._qmp_timer)
++
+     def _early_cleanup(self) -> None:
+         """
+         Perform any cleanup that needs to happen before the VM exits.
+-- 
+1.8.3.1
+
+
+

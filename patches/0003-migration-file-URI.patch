@@ -1,0 +1,195 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 03/46] migration: file URI
+Date: Tue, 26 Jul 2022 09:10:00 -0700
+
+Extend the migration URI to support file:<filename>.  This can be used for
+any migration scenario that does not require a reverse path.  It is easier
+to use than the fd:<fdname> URI.  It can be use in HMP commands, and as
+a qemu command-line parameter.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ migration/file.c       | 62 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ migration/file.h       | 14 ++++++++++++
+ migration/meson.build  |  1 +
+ migration/migration.c  |  5 ++++
+ migration/trace-events |  4 ++++
+ qemu-options.hx        |  6 ++++-
+ 6 files changed, 91 insertions(+), 1 deletion(-)
+ create mode 100644 migration/file.c
+ create mode 100644 migration/file.h
+
+diff --git a/migration/file.c b/migration/file.c
+new file mode 100644
+index 0000000..233bcda
+--- /dev/null
++++ b/migration/file.c
+@@ -0,0 +1,62 @@
++/*
++ * Copyright (c) 2021, 2022 Oracle and/or its affiliates.
++ *
++ * This work is licensed under the terms of the GNU GPL, version 2.
++ * See the COPYING file in the top-level directory.
++ */
++
++#include "qemu/osdep.h"
++#include "channel.h"
++#include "file.h"
++#include "migration.h"
++#include "io/channel-file.h"
++#include "io/channel-util.h"
++#include "trace.h"
++
++void file_start_outgoing_migration(MigrationState *s, const char *filename,
++                                   Error **errp)
++{
++    g_autoptr(QIOChannelFile) fioc = NULL;
++    QIOChannel *ioc;
++
++    trace_migration_file_outgoing(filename);
++
++    fioc = qio_channel_file_new_path(filename, O_CREAT | O_WRONLY | O_TRUNC,
++                                     0600, errp);
++    if (!fioc) {
++        return;
++    }
++
++    ioc = QIO_CHANNEL(fioc);
++    qio_channel_set_name(ioc, "migration-file-outgoing");
++    migration_channel_connect(s, ioc, NULL, NULL);
++}
++
++static gboolean file_accept_incoming_migration(QIOChannel *ioc,
++                                               GIOCondition condition,
++                                               gpointer opaque)
++{
++    migration_channel_process_incoming(ioc);
++    object_unref(OBJECT(ioc));
++    return G_SOURCE_REMOVE;
++}
++
++void file_start_incoming_migration(const char *filename, Error **errp)
++{
++    QIOChannelFile *fioc = NULL;
++    QIOChannel *ioc;
++
++    trace_migration_file_incoming(filename);
++
++    fioc = qio_channel_file_new_path(filename, O_RDONLY, 0, errp);
++    if (!fioc) {
++        return;
++    }
++
++    ioc = QIO_CHANNEL(fioc);
++    qio_channel_set_name(QIO_CHANNEL(ioc), "migration-file-incoming");
++    qio_channel_add_watch_full(ioc, G_IO_IN,
++                               file_accept_incoming_migration,
++                               NULL, NULL,
++                               g_main_context_get_thread_default());
++}
+diff --git a/migration/file.h b/migration/file.h
+new file mode 100644
+index 0000000..aa697df
+--- /dev/null
++++ b/migration/file.h
+@@ -0,0 +1,14 @@
++/*
++ * Copyright (c) 2021, 2022 Oracle and/or its affiliates.
++ *
++ * This work is licensed under the terms of the GNU GPL, version 2.
++ * See the COPYING file in the top-level directory.
++ */
++
++#ifndef QEMU_MIGRATION_FILE_H
++#define QEMU_MIGRATION_FILE_H
++void file_start_incoming_migration(const char *filename, Error **errp);
++
++void file_start_outgoing_migration(MigrationState *s, const char *filename,
++                                   Error **errp);
++#endif
+diff --git a/migration/meson.build b/migration/meson.build
+index 690487c..30a8392 100644
+--- a/migration/meson.build
++++ b/migration/meson.build
+@@ -17,6 +17,7 @@ softmmu_ss.add(files(
+   'colo.c',
+   'exec.c',
+   'fd.c',
++  'file.c',
+   'global_state.c',
+   'migration.c',
+   'multifd.c',
+diff --git a/migration/migration.c b/migration/migration.c
+index e03f698..d1cfca1 100644
+--- a/migration/migration.c
++++ b/migration/migration.c
+@@ -20,6 +20,7 @@
+ #include "migration/blocker.h"
+ #include "exec.h"
+ #include "fd.h"
++#include "file.h"
+ #include "socket.h"
+ #include "sysemu/runstate.h"
+ #include "sysemu/sysemu.h"
+@@ -505,6 +506,8 @@ static void qemu_start_incoming_migration(const char *uri, Error **errp)
+         exec_start_incoming_migration(p, errp);
+     } else if (strstart(uri, "fd:", &p)) {
+         fd_start_incoming_migration(p, errp);
++    } else if (strstart(uri, "file:", &p)) {
++        file_start_incoming_migration(p, errp);
+     } else {
+         error_setg(errp, "unknown migration protocol: %s", uri);
+     }
+@@ -2414,6 +2417,8 @@ void qmp_migrate(const char *uri, bool has_blk, bool blk,
+         exec_start_outgoing_migration(s, p, &local_err);
+     } else if (strstart(uri, "fd:", &p)) {
+         fd_start_outgoing_migration(s, p, &local_err);
++    } else if (strstart(uri, "file:", &p)) {
++        file_start_outgoing_migration(s, p, &local_err);
+     } else {
+         if (!(has_resume && resume)) {
+             yank_unregister_instance(MIGRATION_YANK_INSTANCE);
+diff --git a/migration/trace-events b/migration/trace-events
+index a34afe7..d72dd85 100644
+--- a/migration/trace-events
++++ b/migration/trace-events
+@@ -302,6 +302,10 @@ migration_exec_incoming(const char *cmd) "cmd=%s"
+ migration_fd_outgoing(int fd) "fd=%d"
+ migration_fd_incoming(int fd) "fd=%d"
+ 
++# file.c
++migration_file_outgoing(const char *filename) "filename=%s"
++migration_file_incoming(const char *filename) "filename=%s"
++
+ # socket.c
+ migration_socket_incoming_accepted(void) ""
+ migration_socket_outgoing_connected(const char *hostname) "hostname=%s"
+diff --git a/qemu-options.hx b/qemu-options.hx
+index 79e0091..5ff47f4 100644
+--- a/qemu-options.hx
++++ b/qemu-options.hx
+@@ -4451,6 +4451,7 @@ DEF("incoming", HAS_ARG, QEMU_OPTION_incoming, \
+     "                prepare for incoming migration, listen on\n" \
+     "                specified protocol and socket address\n" \
+     "-incoming fd:fd\n" \
++    "-incoming file:filename\n" \
+     "-incoming exec:cmdline\n" \
+     "                accept incoming migration on given file descriptor\n" \
+     "                or from given external command\n" \
+@@ -4467,7 +4468,10 @@ SRST
+     Prepare for incoming migration, listen on a given unix socket.
+ 
+ ``-incoming fd:fd``
+-    Accept incoming migration from a given filedescriptor.
++    Accept incoming migration from a given file descriptor.
++
++``-incoming file:filename``
++    Accept incoming migration from a given file.
+ 
+ ``-incoming exec:cmdline``
+     Accept incoming migration as an output from specified external
+-- 
+1.8.3.1
+
+
+

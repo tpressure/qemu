@@ -1,0 +1,69 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 38/46] chardev: cpr for pty
+Date: Tue, 26 Jul 2022 09:10:35 -0700
+
+Save and restore pty descriptors across cpr-exec.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ chardev/char-pty.c | 16 +++++++++++++++-
+ 1 file changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/chardev/char-pty.c b/chardev/char-pty.c
+index 53f25c6..5707b13 100644
+--- a/chardev/char-pty.c
++++ b/chardev/char-pty.c
+@@ -29,6 +29,7 @@
+ #include "qemu/sockets.h"
+ #include "qemu/error-report.h"
+ #include "qemu/module.h"
++#include "migration/cpr-state.h"
+ #include "qemu/qemu-print.h"
+ 
+ #include "chardev/char-io.h"
+@@ -190,6 +191,9 @@ static void char_pty_finalize(Object *obj)
+     Chardev *chr = CHARDEV(obj);
+     PtyChardev *s = PTY_CHARDEV(obj);
+ 
++    if (chr->cpr_enabled) {
++        cpr_delete_fd(chr->label, 0);
++    }
+     pty_chr_state(chr, 0);
+     object_unref(OBJECT(s->ioc));
+     pty_chr_timer_cancel(s);
+@@ -317,12 +321,20 @@ static void char_pty_open(Chardev *chr,
+     char pty_name[PATH_MAX];
+     char *name;
+ 
++    master_fd = cpr_find_fd(chr->label, 0);
++    if (master_fd >= 0) {
++        chr->filename = g_strdup_printf("pty:unknown");
++        goto have_fd;
++    }
++
+     master_fd = qemu_openpty_raw(&slave_fd, pty_name);
+     if (master_fd < 0) {
+         error_setg_errno(errp, errno, "Failed to create PTY");
+         return;
+     }
+-
++    if (chr->cpr_enabled) {
++        cpr_save_fd(chr->label, 0, master_fd);
++    }
+     close(slave_fd);
+     if (!g_unix_set_fd_nonblocking(master_fd, true, NULL)) {
+         error_setg_errno(errp, errno, "Failed to set FD nonblocking");
+@@ -333,6 +345,8 @@ static void char_pty_open(Chardev *chr,
+     qemu_printf("char device redirected to %s (label %s)\n",
+                 pty_name, chr->label);
+ 
++have_fd:
++    qemu_chr_set_feature(chr, QEMU_CHAR_FEATURE_CPR);
+     s = PTY_CHARDEV(chr);
+     s->ioc = QIO_CHANNEL(qio_channel_file_new_fd(master_fd));
+     name = g_strdup_printf("chardev-pty-%s", chr->label);
+-- 
+1.8.3.1
+
+
+

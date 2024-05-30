@@ -1,0 +1,67 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 09/46] cpr: reboot mode
+Date: Tue, 26 Jul 2022 09:10:06 -0700
+
+Add the cpr-reboot migration mode.  Usage:
+  qemu-system-$arch -migrate-mode-enable cpr-reboot ...
+  migrate_set_parameter mode cpr-reboot
+  migrate -d file:<filename>
+  ... poll for runstate postmigrate ...
+  quit
+
+  qemu-system-$arch -migrate-mode-enable cpr-reboot ... -incoming defer
+  migrate_set_parameter mode cpr-reboot
+  migrate_incoming file:<filename>
+
+In this mode, the migrate command saves state to a file, allowing one
+to quit qemu, reboot to an updated kernel, and restart an updated version
+of qemu.  The caller must specify a migration URI that writes to and reads
+from a file.  Unlike normal mode, the use of certain local storage options
+does not block the migration, but the caller must not modify guest block
+devices between the quit and restart.  The guest RAM memory-backend must
+be shared, and the @x-ignore-shared migration capability must be set,
+to avoid saving it to the file.  Guest RAM must be non-volatile across
+reboot, such as by backing it with a dax device, but this is not enforced.
+The restarted qemu arguments must match those used to initially start qemu,
+plus the -incoming option.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ qapi/migration.json | 16 +++++++++++++++-
+ 1 file changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/qapi/migration.json b/qapi/migration.json
+index 931c492..55f0479 100644
+--- a/qapi/migration.json
++++ b/qapi/migration.json
+@@ -572,10 +572,24 @@
+ #
+ # @normal: the original form of migration.
+ #
++# @cpr-reboot: The migrate command saves state to a file, allowing one to
++#              quit qemu, reboot to an updated kernel, and restart an updated
++#              version of qemu.  The caller must specify a migration URI
++#              that writes to and reads from a file.  Unlike normal mode,
++#              the use of certain local storage options does not block the
++#              migration, but the caller must not modify guest block devices
++#              between the quit and restart.  The guest RAM memory-backend
++#              must be shared, and the @x-ignore-shared migration capability
++#              must be set, to avoid saving it to the file.  Guest RAM must
++#              be non-volatile across reboot, such as by backing it with
++#              a dax device, but this is not enforced.  The restarted qemu
++#              arguments must match those used to initially start qemu, plus
++#              the -incoming option.
++#
+ # Since: 7.1
+ ##
+ { 'enum': 'MigMode',
+-  'data': [ 'normal' ] }
++  'data': [ 'normal', 'cpr-reboot' ] }
+ 
+ ##
+ # @BitmapMigrationBitmapAliasTransform:
+-- 
+1.8.3.1
+
+
+

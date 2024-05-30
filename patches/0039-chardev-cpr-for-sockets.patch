@@ -1,0 +1,160 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 39/46] chardev: cpr for sockets
+Date: Tue, 26 Jul 2022 09:10:36 -0700
+
+Save accepted socket fds before cpr-exec, and look for them after.
+Block cpr-exec if a socket enables the TLS or websocket option.
+Allow a monitor socket by closing it on exec.
+
+Signed-off-by: Mark Kanda <mark.kanda@oracle.com>
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ chardev/char-socket.c         | 48 +++++++++++++++++++++++++++++++++++++++++++
+ include/chardev/char-socket.h |  1 +
+ monitor/hmp.c                 |  3 +++
+ monitor/qmp.c                 |  4 ++++
+ 4 files changed, 56 insertions(+)
+
+diff --git a/chardev/char-socket.c b/chardev/char-socket.c
+index dc4e218..f93bae8 100644
+--- a/chardev/char-socket.c
++++ b/chardev/char-socket.c
+@@ -26,6 +26,8 @@
+ #include "chardev/char.h"
+ #include "io/channel-socket.h"
+ #include "io/channel-websock.h"
++#include "migration/blocker.h"
++#include "migration/cpr-state.h"
+ #include "qemu/error-report.h"
+ #include "qemu/module.h"
+ #include "qemu/option.h"
+@@ -33,6 +35,7 @@
+ #include "qapi/clone-visitor.h"
+ #include "qapi/qapi-visit-sockets.h"
+ #include "qemu/yank.h"
++#include "sysemu/sysemu.h"
+ 
+ #include "chardev/char-io.h"
+ #include "chardev/char-socket.h"
+@@ -358,6 +361,11 @@ static void tcp_chr_free_connection(Chardev *chr)
+     SocketChardev *s = SOCKET_CHARDEV(chr);
+     int i;
+ 
++    if (chr->cpr_enabled) {
++        cpr_delete_fd(chr->label, 0);
++    }
++    migrate_del_blocker(&s->cpr_blocker);
++
+     if (s->read_msgfds_num) {
+         for (i = 0; i < s->read_msgfds_num; i++) {
+             close(s->read_msgfds[i]);
+@@ -923,6 +931,10 @@ static void tcp_chr_accept(QIONetListener *listener,
+                                QIO_CHANNEL(cioc));
+     }
+     tcp_chr_new_client(chr, cioc);
++
++    if (s->sioc && chr->cpr_enabled) {
++        cpr_resave_fd(chr->label, 0, s->sioc->fd);
++    }
+ }
+ 
+ 
+@@ -1178,6 +1190,27 @@ static gboolean socket_reconnect_timeout(gpointer opaque)
+     return false;
+ }
+ 
++static int load_char_socket_fd(Chardev *chr, Error **errp)
++{
++    ERRP_GUARD();
++    SocketChardev *sockchar = SOCKET_CHARDEV(chr);
++    QIOChannelSocket *sioc;
++    const char *label = chr->label;
++    int fd = cpr_find_fd(label, 0);
++
++    if (fd != -1) {
++        sockchar = SOCKET_CHARDEV(chr);
++        sioc = qio_channel_socket_new_fd(fd, errp);
++        if (sioc) {
++            tcp_chr_accept(sockchar->listener, sioc, chr);
++            object_unref(OBJECT(sioc));
++        } else {
++            error_prepend(errp, "could not restore socket for %s", label);
++            return -1;
++        }
++    }
++    return 0;
++}
+ 
+ static int qmp_chardev_open_socket_server(Chardev *chr,
+                                           bool is_telnet,
+@@ -1388,6 +1421,19 @@ static void qmp_chardev_open_socket(Chardev *chr,
+     }
+     s->registered_yank = true;
+ 
++    if (!s->tls_creds && !s->is_websock) {
++        qemu_chr_set_feature(chr, QEMU_CHAR_FEATURE_CPR);
++    } else if (!chr->reopen_on_cpr) {
++        s->cpr_blocker = NULL;
++        error_setg(&s->cpr_blocker,
++                   "error: socket %s is not cpr capable due to %s option",
++                   chr->label, (s->tls_creds ? "TLS" : "websocket"));
++        if (migrate_add_blockers(&s->cpr_blocker, errp, MIG_MODE_CPR_EXEC,
++                                 -1)) {
++            return;
++        }
++    }
++
+     /* be isn't opened until we get a connection */
+     *be_opened = false;
+ 
+@@ -1403,6 +1449,8 @@ static void qmp_chardev_open_socket(Chardev *chr,
+             return;
+         }
+     }
++
++    load_char_socket_fd(chr, errp);
+ }
+ 
+ static void qemu_chr_parse_socket(QemuOpts *opts, ChardevBackend *backend,
+diff --git a/include/chardev/char-socket.h b/include/chardev/char-socket.h
+index 0708ca6..1c3abf7 100644
+--- a/include/chardev/char-socket.h
++++ b/include/chardev/char-socket.h
+@@ -78,6 +78,7 @@ struct SocketChardev {
+     bool connect_err_reported;
+ 
+     QIOTask *connect_task;
++    Error *cpr_blocker;
+ };
+ typedef struct SocketChardev SocketChardev;
+ 
+diff --git a/monitor/hmp.c b/monitor/hmp.c
+index 15ca047..75e6739 100644
+--- a/monitor/hmp.c
++++ b/monitor/hmp.c
+@@ -1501,4 +1501,7 @@ void monitor_init_hmp(Chardev *chr, bool use_readline, Error **errp)
+     qemu_chr_fe_set_handlers(&mon->common.chr, monitor_can_read, monitor_read,
+                              monitor_event, NULL, &mon->common, NULL, true);
+     monitor_list_append(&mon->common);
++
++    /* monitor cannot yet be preserved across cpr */
++    chr->reopen_on_cpr = true;
+ }
+diff --git a/monitor/qmp.c b/monitor/qmp.c
+index 092c527..0b3aac6 100644
+--- a/monitor/qmp.c
++++ b/monitor/qmp.c
+@@ -535,4 +535,8 @@ void monitor_init_qmp(Chardev *chr, bool pretty, Error **errp)
+                                  NULL, &mon->common, NULL, true);
+         monitor_list_append(&mon->common);
+     }
++
++    /* Monitor cannot yet be preserved across cpr */
++    chr->reopen_on_cpr = true;
++    chr->cpr_enabled = false;
+ }
+-- 
+1.8.3.1
+
+
+

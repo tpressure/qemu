@@ -1,0 +1,59 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 13/46] qapi: strv_from_strList
+Date: Tue, 26 Jul 2022 09:10:10 -0700
+Content-Type: text/plain; charset=UTF-8
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+Reviewed-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+---
+ include/qapi/util.h |  6 ++++++
+ qapi/qapi-util.c    | 14 ++++++++++++++
+ 2 files changed, 20 insertions(+)
+
+diff --git a/include/qapi/util.h b/include/qapi/util.h
+index 75dddca..51ff64e 100644
+--- a/include/qapi/util.h
++++ b/include/qapi/util.h
+@@ -33,6 +33,12 @@ bool qapi_bool_parse(const char *name, const char *value, bool *obj,
+ int parse_qapi_name(const char *name, bool complete);
+ 
+ /*
++ * Produce and return a NULL-terminated array of strings from @args.
++ * All strings are g_strdup'd.
++ */
++GStrv strv_from_strList(const struct strList *args);
++
++/*
+  * Produce a strList from the character delimited string @in.
+  * All strings are g_strdup'd.
+  * A NULL or empty input string returns NULL.
+diff --git a/qapi/qapi-util.c b/qapi/qapi-util.c
+index b61c73c..fe6bda2 100644
+--- a/qapi/qapi-util.c
++++ b/qapi/qapi-util.c
+@@ -154,6 +154,20 @@ int parse_qapi_name(const char *str, bool complete)
+     return p - str;
+ }
+ 
++GStrv strv_from_strList(const strList *args)
++{
++    const strList *arg;
++    int i = 0;
++    GStrv argv = g_new(char *, QAPI_LIST_LENGTH(args) + 1);
++
++    for (arg = args; arg != NULL; arg = arg->next) {
++        argv[i++] = g_strdup(arg->value);
++    }
++    argv[i] = NULL;
++
++    return argv;
++}
++
+ strList *strList_from_string(const char *in, char delim)
+ {
+     strList *res = NULL;
+-- 
+1.8.3.1
+
+
+

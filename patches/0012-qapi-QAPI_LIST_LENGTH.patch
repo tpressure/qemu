@@ -1,0 +1,38 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 12/46] qapi: QAPI_LIST_LENGTH
+Date: Tue, 26 Jul 2022 09:10:09 -0700
+Content-Type: text/plain; charset=UTF-8
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+Reviewed-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+---
+ include/qapi/util.h | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/include/qapi/util.h b/include/qapi/util.h
+index 7d88b09..75dddca 100644
+--- a/include/qapi/util.h
++++ b/include/qapi/util.h
+@@ -65,4 +65,17 @@ struct strList *strList_from_string(const char *in, char delim);
+     (tail) = &(*(tail))->next; \
+ } while (0)
+ 
++/*
++ * For any GenericList @list, return its length.
++ */
++#define QAPI_LIST_LENGTH(list) \
++    ({ \
++        int len = 0; \
++        typeof(list) elem; \
++        for (elem = list; elem != NULL; elem = elem->next) { \
++            len++; \
++        } \
++        len; \
++    })
++
+ #endif
+-- 
+1.8.3.1
+
+
+

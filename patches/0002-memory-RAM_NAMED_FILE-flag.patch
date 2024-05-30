@@ -1,0 +1,101 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 02/46] memory: RAM_NAMED_FILE flag
+Date: Tue, 26 Jul 2022 09:09:59 -0700
+
+A memory-backend-ram or a memory-backend-memfd block with the RAM_SHARED
+flag set is not migrated when migrate_ignore_shared() is true, but this
+is wrong, because it has no named backing store, and its contents will be
+lost.  Define a new flag RAM_NAMED_FILE to distinguish this case.  Cpr will
+also test this flag, for similar reasons.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ backends/hostmem-file.c | 1 +
+ include/exec/memory.h   | 3 +++
+ include/exec/ram_addr.h | 1 +
+ migration/ram.c         | 3 ++-
+ softmmu/physmem.c       | 7 ++++++-
+ 5 files changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/backends/hostmem-file.c b/backends/hostmem-file.c
+index 2514128..486d77d 100644
+--- a/backends/hostmem-file.c
++++ b/backends/hostmem-file.c
+@@ -56,6 +56,7 @@ file_backend_memory_alloc(HostMemoryBackend *backend, Error **errp)
+     ram_flags = backend->share ? RAM_SHARED : 0;
+     ram_flags |= backend->reserve ? 0 : RAM_NORESERVE;
+     ram_flags |= fb->is_pmem ? RAM_PMEM : 0;
++    ram_flags |= RAM_NAMED_FILE;
+     memory_region_init_ram_from_file(&backend->mr, OBJECT(backend), name,
+                                      backend->size, fb->align, ram_flags,
+                                      fb->mem_path, fb->readonly, errp);
+diff --git a/include/exec/memory.h b/include/exec/memory.h
+index bfb1de8..7513d04 100644
+--- a/include/exec/memory.h
++++ b/include/exec/memory.h
+@@ -206,6 +206,9 @@ typedef struct IOMMUTLBEvent {
+ /* RAM that isn't accessible through normal means. */
+ #define RAM_PROTECTED (1 << 8)
+ 
++/* RAM is an mmap-ed named file */
++#define RAM_NAMED_FILE (1 << 9)
++
+ static inline void iommu_notifier_init(IOMMUNotifier *n, IOMMUNotify fn,
+                                        IOMMUNotifierFlag flags,
+                                        hwaddr start, hwaddr end,
+diff --git a/include/exec/ram_addr.h b/include/exec/ram_addr.h
+index f3e0c78..4405e2e 100644
+--- a/include/exec/ram_addr.h
++++ b/include/exec/ram_addr.h
+@@ -94,6 +94,7 @@ static inline unsigned long int ramblock_recv_bitmap_offset(void *host_addr,
+ }
+ 
+ bool ramblock_is_pmem(RAMBlock *rb);
++bool ramblock_is_named_file(RAMBlock *rb);
+ 
+ long qemu_minrampagesize(void);
+ long qemu_maxrampagesize(void);
+diff --git a/migration/ram.c b/migration/ram.c
+index b94669b..3ea3b41 100644
+--- a/migration/ram.c
++++ b/migration/ram.c
+@@ -165,7 +165,8 @@ out:
+ bool ramblock_is_ignored(RAMBlock *block)
+ {
+     return !qemu_ram_is_migratable(block) ||
+-           (migrate_ignore_shared() && qemu_ram_is_shared(block));
++           (migrate_ignore_shared() && qemu_ram_is_shared(block) &&
++            ramblock_is_named_file(block));
+ }
+ 
+ #undef RAMBLOCK_FOREACH
+diff --git a/softmmu/physmem.c b/softmmu/physmem.c
+index dc3c3e5..cce721a 100644
+--- a/softmmu/physmem.c
++++ b/softmmu/physmem.c
+@@ -2070,7 +2070,7 @@ RAMBlock *qemu_ram_alloc_from_fd(ram_addr_t size, MemoryRegion *mr,
+ 
+     /* Just support these ram flags by now. */
+     assert((ram_flags & ~(RAM_SHARED | RAM_PMEM | RAM_NORESERVE |
+-                          RAM_PROTECTED)) == 0);
++                          RAM_PROTECTED | RAM_NAMED_FILE)) == 0);
+ 
+     if (xen_enabled()) {
+         error_setg(errp, "-mem-path not supported with Xen");
+@@ -3675,6 +3675,11 @@ bool ramblock_is_pmem(RAMBlock *rb)
+     return rb->flags & RAM_PMEM;
+ }
+ 
++bool ramblock_is_named_file(RAMBlock *rb)
++{
++    return rb->flags & RAM_NAMED_FILE;
++}
++
+ static void mtree_print_phys_entries(int start, int end, int skip, int ptr)
+ {
+     if (start == end - 1) {
+-- 
+1.8.3.1
+
+
+

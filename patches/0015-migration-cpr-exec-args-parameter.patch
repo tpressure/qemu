@@ -1,0 +1,198 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 15/46] migration: cpr-exec-args parameter
+Date: Tue, 26 Jul 2022 09:10:12 -0700
+
+Create the cpr-exec-args migration parameter, defined as a list of
+strings.  It will be used for cpr-exec migration mode in a subsequent
+patch.
+
+No functional change, except that cpr-exec-args is shown by the
+'info migrate' command.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ hmp-commands.hx       |  2 +-
+ migration/migration.c | 15 +++++++++++++++
+ monitor/hmp-cmds.c    | 20 ++++++++++++++++++++
+ qapi/migration.json   |  9 +++++++++
+ 4 files changed, 45 insertions(+), 1 deletion(-)
+
+diff --git a/hmp-commands.hx b/hmp-commands.hx
+index 182e639..6f5154b 100644
+--- a/hmp-commands.hx
++++ b/hmp-commands.hx
+@@ -1006,7 +1006,7 @@ ERST
+ 
+     {
+         .name       = "migrate_set_parameter",
+-        .args_type  = "parameter:s,value:s",
++        .args_type  = "parameter:s,value:S",
+         .params     = "parameter value",
+         .help       = "Set the parameter for migration",
+         .cmd        = hmp_migrate_set_parameter,
+diff --git a/migration/migration.c b/migration/migration.c
+index 0e62227..80b7d09 100644
+--- a/migration/migration.c
++++ b/migration/migration.c
+@@ -923,6 +923,8 @@ MigrationParameters *qmp_query_migrate_parameters(Error **errp)
+     params->cpu_throttle_increment = s->parameters.cpu_throttle_increment;
+     params->has_cpu_throttle_tailslow = true;
+     params->cpu_throttle_tailslow = s->parameters.cpu_throttle_tailslow;
++    params->has_cpr_exec_args = true;
++    params->cpr_exec_args = QAPI_CLONE(strList, s->parameters.cpr_exec_args);
+     params->has_tls_creds = true;
+     params->tls_creds = g_strdup(s->parameters.tls_creds);
+     params->has_tls_hostname = true;
+@@ -1615,6 +1617,10 @@ static void migrate_params_test_apply(MigrateSetParameters *params,
+         dest->cpu_throttle_tailslow = params->cpu_throttle_tailslow;
+     }
+ 
++    if (params->has_cpr_exec_args) {
++        dest->cpr_exec_args = params->cpr_exec_args;
++    }
++
+     if (params->has_tls_creds) {
+         assert(params->tls_creds->type == QTYPE_QSTRING);
+         dest->tls_creds = params->tls_creds->u.s;
+@@ -1716,6 +1722,12 @@ static void migrate_params_apply(MigrateSetParameters *params, Error **errp)
+         s->parameters.cpu_throttle_tailslow = params->cpu_throttle_tailslow;
+     }
+ 
++    if (params->has_cpr_exec_args) {
++        qapi_free_strList(s->parameters.cpr_exec_args);
++        s->parameters.cpr_exec_args =
++            QAPI_CLONE(strList, params->cpr_exec_args);
++    }
++
+     if (params->has_tls_creds) {
+         g_free(s->parameters.tls_creds);
+         assert(params->tls_creds->type == QTYPE_QSTRING);
+@@ -4481,6 +4493,8 @@ static Property migration_properties[] = {
+                       DEFAULT_MIGRATE_CPU_THROTTLE_INCREMENT),
+     DEFINE_PROP_BOOL("x-cpu-throttle-tailslow", MigrationState,
+                       parameters.cpu_throttle_tailslow, false),
++    DEFINE_PROP_STRLIST("cpr-exec-args", MigrationState,
++                      parameters.cpr_exec_args),
+     DEFINE_PROP_SIZE("x-max-bandwidth", MigrationState,
+                       parameters.max_bandwidth, MAX_THROTTLE),
+     DEFINE_PROP_UINT64("x-downtime-limit", MigrationState,
+@@ -4597,6 +4611,7 @@ static void migration_instance_init(Object *obj)
+     params->has_compress_threads = true;
+     params->has_decompress_threads = true;
+     params->has_throttle_trigger_threshold = true;
++    params->has_cpr_exec_args = true;
+     params->has_cpu_throttle_initial = true;
+     params->has_cpu_throttle_increment = true;
+     params->has_cpu_throttle_tailslow = true;
+diff --git a/monitor/hmp-cmds.c b/monitor/hmp-cmds.c
+index a394526..8794459 100644
+--- a/monitor/hmp-cmds.c
++++ b/monitor/hmp-cmds.c
+@@ -387,6 +387,18 @@ void hmp_info_migrate_capabilities(Monitor *mon, const QDict *qdict)
+     qapi_free_MigrationCapabilityStatusList(caps);
+ }
+ 
++static void monitor_print_cpr_exec_args(Monitor *mon, strList *args)
++{
++    monitor_printf(mon, "%s:",
++        MigrationParameter_str(MIGRATION_PARAMETER_CPR_EXEC_ARGS));
++
++    while (args) {
++        monitor_printf(mon, " %s", args->value);
++        args = args->next;
++    }
++    monitor_printf(mon, "\n");
++}
++
+ void hmp_info_migrate_parameters(Monitor *mon, const QDict *qdict)
+ {
+     MigrationParameters *params;
+@@ -446,6 +458,8 @@ void hmp_info_migrate_parameters(Monitor *mon, const QDict *qdict)
+         monitor_printf(mon, "%s: %u\n",
+             MigrationParameter_str(MIGRATION_PARAMETER_MAX_CPU_THROTTLE),
+             params->max_cpu_throttle);
++        assert(params->has_cpr_exec_args);
++        monitor_print_cpr_exec_args(mon, params->cpr_exec_args);
+         assert(params->has_tls_creds);
+         monitor_printf(mon, "%s: '%s'\n",
+             MigrationParameter_str(MIGRATION_PARAMETER_TLS_CREDS),
+@@ -1190,6 +1204,7 @@ void hmp_migrate_set_parameter(Monitor *mon, const QDict *qdict)
+     uint64_t valuebw = 0;
+     uint64_t cache_size;
+     Error *err = NULL;
++    g_autofree char *str = NULL;
+     int val, ret;
+ 
+     val = qapi_enum_parse(&MigrationParameter_lookup, param, -1, &err);
+@@ -1238,6 +1253,11 @@ void hmp_migrate_set_parameter(Monitor *mon, const QDict *qdict)
+         p->has_max_cpu_throttle = true;
+         visit_type_uint8(v, param, &p->max_cpu_throttle, &err);
+         break;
++    case MIGRATION_PARAMETER_CPR_EXEC_ARGS:
++        p->has_cpr_exec_args = true;
++        visit_type_str(v, param, &str, &err);
++        p->cpr_exec_args = strList_from_string(str, ' ');
++        break;
+     case MIGRATION_PARAMETER_TLS_CREDS:
+         p->has_tls_creds = true;
+         p->tls_creds = g_new0(StrOrNull, 1);
+diff --git a/qapi/migration.json b/qapi/migration.json
+index 55f0479..839fcd4 100644
+--- a/qapi/migration.json
++++ b/qapi/migration.json
+@@ -712,6 +712,8 @@
+ #                         at tail stage.
+ #                         The default value is false. (Since 5.1)
+ #
++# @cpr-exec-args: defined in a subsequent patch.
++#
+ # @tls-creds: ID of the 'tls-creds' object that provides credentials for
+ #             establishing a TLS connection over the migration data channel.
+ #             On the outgoing side of the migration, the credentials must
+@@ -816,6 +818,7 @@
+            'compress-wait-thread', 'throttle-trigger-threshold',
+            'cpu-throttle-initial', 'cpu-throttle-increment',
+            'cpu-throttle-tailslow',
++           'cpr-exec-args',
+            'tls-creds', 'tls-hostname', 'tls-authz', 'max-bandwidth',
+            'downtime-limit',
+            { 'name': 'x-checkpoint-delay', 'features': [ 'unstable' ] },
+@@ -882,6 +885,8 @@
+ #                         at tail stage.
+ #                         The default value is false. (Since 5.1)
+ #
++# @cpr-exec-args: defined in a subsequent patch.
++#
+ # @tls-creds: ID of the 'tls-creds' object that provides credentials
+ #             for establishing a TLS connection over the migration data
+ #             channel. On the outgoing side of the migration, the credentials
+@@ -993,6 +998,7 @@
+             '*cpu-throttle-initial': 'uint8',
+             '*cpu-throttle-increment': 'uint8',
+             '*cpu-throttle-tailslow': 'bool',
++            '*cpr-exec-args': [ 'str' ],
+             '*tls-creds': 'StrOrNull',
+             '*tls-hostname': 'StrOrNull',
+             '*tls-authz': 'StrOrNull',
+@@ -1084,6 +1090,8 @@
+ #                         at tail stage.
+ #                         The default value is false. (Since 5.1)
+ #
++# @cpr-exec-args: defined in a subsequent patch.
++#
+ # @tls-creds: ID of the 'tls-creds' object that provides credentials
+ #             for establishing a TLS connection over the migration data
+ #             channel. On the outgoing side of the migration, the credentials
+@@ -1195,6 +1203,7 @@
+             '*cpu-throttle-initial': 'uint8',
+             '*cpu-throttle-increment': 'uint8',
+             '*cpu-throttle-tailslow': 'bool',
++            '*cpr-exec-args': [ 'str' ],
+             '*tls-creds': 'str',
+             '*tls-hostname': 'str',
+             '*tls-authz': 'str',
+-- 
+1.8.3.1
+
+
+

@@ -1,0 +1,96 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 35/46] vhost: reset vhost devices for cpr
+Date: Tue, 26 Jul 2022 09:10:32 -0700
+
+A vhost device is implicitly preserved across re-exec because its fd is not
+closed, and the value of the fd is specified on the command line for the
+new qemu to find.  However, new qemu issues an VHOST_RESET_OWNER ioctl,
+which fails because the device already has an owner.  To fix, reset the
+owner prior to exec.
+
+Signed-off-by: Mark Kanda <mark.kanda@oracle.com>
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ hw/virtio/vhost.c         | 23 +++++++++++++++++++++++
+ include/hw/virtio/vhost.h |  1 +
+ 2 files changed, 24 insertions(+)
+
+diff --git a/hw/virtio/vhost.c b/hw/virtio/vhost.c
+index 8d2a136..bc8df55 100644
+--- a/hw/virtio/vhost.c
++++ b/hw/virtio/vhost.c
+@@ -23,6 +23,7 @@
+ #include "standard-headers/linux/vhost_types.h"
+ #include "hw/virtio/virtio-bus.h"
+ #include "hw/virtio/virtio-access.h"
++#include "migration/misc.h"
+ #include "migration/blocker.h"
+ #include "migration/qemu-file-types.h"
+ #include "sysemu/dma.h"
+@@ -1347,6 +1348,25 @@ static void vhost_virtqueue_cleanup(struct vhost_virtqueue *vq)
+     }
+ }
+ 
++static void vhost_cpr_exec_notifier(Notifier *notifier, void *data)
++{
++    MigrationState *s = data;
++    struct vhost_dev *dev;
++    int r;
++
++    if (migrate_mode_of(s) == MIG_MODE_CPR_EXEC) {
++        dev = container_of(notifier, struct vhost_dev, cpr_notifier);
++        if (migration_has_failed(s)) {
++            r = dev->vhost_ops->vhost_set_owner(dev);
++        } else {
++            r = dev->vhost_ops->vhost_reset_device(dev);
++        }
++        if (r < 0) {
++            VHOST_OPS_DEBUG(r, "vhost_reset_device failed");
++        }
++    }
++}
++
+ int vhost_dev_init(struct vhost_dev *hdev, void *opaque,
+                    VhostBackendType backend_type, uint32_t busyloop_timeout,
+                    Error **errp)
+@@ -1356,6 +1376,7 @@ int vhost_dev_init(struct vhost_dev *hdev, void *opaque,
+ 
+     hdev->vdev = NULL;
+     hdev->migration_blocker = NULL;
++    hdev->cpr_notifier.notify = NULL;
+ 
+     r = vhost_set_backend_type(hdev, backend_type);
+     assert(r >= 0);
+@@ -1446,6 +1467,7 @@ int vhost_dev_init(struct vhost_dev *hdev, void *opaque,
+     hdev->log_enabled = false;
+     hdev->started = false;
+     memory_listener_register(&hdev->memory_listener, &address_space_memory);
++    migration_add_notifier(&hdev->cpr_notifier, vhost_cpr_exec_notifier);
+     QLIST_INSERT_HEAD(&vhost_devices, hdev, entry);
+ 
+     if (used_memslots > hdev->vhost_ops->vhost_backend_memslots_limit(hdev)) {
+@@ -1482,6 +1504,7 @@ void vhost_dev_cleanup(struct vhost_dev *hdev)
+         QLIST_REMOVE(hdev, entry);
+     }
+     migrate_del_blocker(&hdev->migration_blocker);
++    migration_remove_notifier(&hdev->cpr_notifier);
+     g_free(hdev->mem);
+     g_free(hdev->mem_sections);
+     if (hdev->vhost_ops) {
+diff --git a/include/hw/virtio/vhost.h b/include/hw/virtio/vhost.h
+index a346f23..a12c4e1 100644
+--- a/include/hw/virtio/vhost.h
++++ b/include/hw/virtio/vhost.h
+@@ -101,6 +101,7 @@ struct vhost_dev {
+     QLIST_ENTRY(vhost_dev) entry;
+     QLIST_HEAD(, vhost_iommu) iommu_list;
+     IOMMUNotifier n;
++    Notifier cpr_notifier;
+     const VhostDevConfigOps *config_ops;
+ };
+ 
+-- 
+1.8.3.1
+
+
+

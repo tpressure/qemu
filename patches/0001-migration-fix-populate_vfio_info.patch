@@ -1,0 +1,32 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 01/46] migration: fix populate_vfio_info
+Date: Tue, 26 Jul 2022 09:09:58 -0700
+Content-Type: text/plain; charset=UTF-8
+
+Include CONFIG_DEVICES so that populate_vfio_info is instantiated for
+CONFIG_VFIO.
+
+Fixes: 43bd0bf30f ("migration: Move populate_vfio_info() into a separate file")
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+Reviewed-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+---
+ migration/target.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/migration/target.c b/migration/target.c
+index 907ebf0..a0991bc 100644
+--- a/migration/target.c
++++ b/migration/target.c
+@@ -8,6 +8,7 @@
+ #include "qemu/osdep.h"
+ #include "qapi/qapi-types-migration.h"
+ #include "migration.h"
++#include CONFIG_DEVICES
+ 
+ #ifdef CONFIG_VFIO
+ #include "hw/vfio/vfio-common.h"
+-- 
+1.8.3.1
+
+
+

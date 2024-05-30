@@ -1,0 +1,149 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 11/46] qapi: strList_from_string
+Date: Tue, 26 Jul 2022 09:10:08 -0700
+
+Generalize strList_from_comma_list() to take any delimiter character, rename
+as strList_from_string(), and move it to qapi/util.c.
+
+No functional change.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ include/qapi/util.h |  9 +++++++++
+ monitor/hmp-cmds.c  | 31 +++----------------------------
+ qapi/qapi-util.c    | 23 +++++++++++++++++++++++
+ 3 files changed, 35 insertions(+), 28 deletions(-)
+
+diff --git a/include/qapi/util.h b/include/qapi/util.h
+index 81a2b13..7d88b09 100644
+--- a/include/qapi/util.h
++++ b/include/qapi/util.h
+@@ -22,6 +22,8 @@ typedef struct QEnumLookup {
+     const int size;
+ } QEnumLookup;
+ 
++struct strList;
++
+ const char *qapi_enum_lookup(const QEnumLookup *lookup, int val);
+ int qapi_enum_parse(const QEnumLookup *lookup, const char *buf,
+                     int def, Error **errp);
+@@ -31,6 +33,13 @@ bool qapi_bool_parse(const char *name, const char *value, bool *obj,
+ int parse_qapi_name(const char *name, bool complete);
+ 
+ /*
++ * Produce a strList from the character delimited string @in.
++ * All strings are g_strdup'd.
++ * A NULL or empty input string returns NULL.
++ */
++struct strList *strList_from_string(const char *in, char delim);
++
++/*
+  * For any GenericList @list, insert @element at the front.
+  *
+  * Note that this macro evaluates @element exactly once, so it is safe
+diff --git a/monitor/hmp-cmds.c b/monitor/hmp-cmds.c
+index 6632ada..a394526 100644
+--- a/monitor/hmp-cmds.c
++++ b/monitor/hmp-cmds.c
+@@ -43,6 +43,7 @@
+ #include "qapi/qapi-commands-stats.h"
+ #include "qapi/qapi-commands-tpm.h"
+ #include "qapi/qapi-commands-ui.h"
++#include "qapi/util.h"
+ #include "qapi/qapi-visit-net.h"
+ #include "qapi/qapi-visit-migration.h"
+ #include "qapi/qmp/qdict.h"
+@@ -71,32 +72,6 @@ bool hmp_handle_error(Monitor *mon, Error *err)
+     return false;
+ }
+ 
+-/*
+- * Produce a strList from a comma separated list.
+- * A NULL or empty input string return NULL.
+- */
+-static strList *strList_from_comma_list(const char *in)
+-{
+-    strList *res = NULL;
+-    strList **tail = &res;
+-
+-    while (in && in[0]) {
+-        char *comma = strchr(in, ',');
+-        char *value;
+-
+-        if (comma) {
+-            value = g_strndup(in, comma - in);
+-            in = comma + 1; /* skip the , */
+-        } else {
+-            value = g_strdup(in);
+-            in = NULL;
+-        }
+-        QAPI_LIST_APPEND(tail, value);
+-    }
+-
+-    return res;
+-}
+-
+ void hmp_info_name(Monitor *mon, const QDict *qdict)
+ {
+     NameInfo *info;
+@@ -1125,7 +1100,7 @@ void hmp_announce_self(Monitor *mon, const QDict *qdict)
+                                             migrate_announce_params());
+ 
+     qapi_free_strList(params->interfaces);
+-    params->interfaces = strList_from_comma_list(interfaces_str);
++    params->interfaces = strList_from_string(interfaces_str, ',');
+     params->has_interfaces = params->interfaces != NULL;
+     params->id = g_strdup(id);
+     params->has_id = !!params->id;
+@@ -2409,7 +2384,7 @@ static StatsFilter *stats_filter(StatsTarget target, const char *names,
+             request->provider = provider_idx;
+             if (names && !g_str_equal(names, "*")) {
+                 request->has_names = true;
+-                request->names = strList_from_comma_list(names);
++                request->names = strList_from_string(names, ',');
+             }
+             QAPI_LIST_PREPEND(request_list, request);
+         }
+diff --git a/qapi/qapi-util.c b/qapi/qapi-util.c
+index 63596e1..b61c73c 100644
+--- a/qapi/qapi-util.c
++++ b/qapi/qapi-util.c
+@@ -15,6 +15,7 @@
+ #include "qapi/error.h"
+ #include "qemu/ctype.h"
+ #include "qapi/qmp/qerror.h"
++#include "qapi/qapi-builtin-types.h"
+ 
+ CompatPolicy compat_policy;
+ 
+@@ -152,3 +153,25 @@ int parse_qapi_name(const char *str, bool complete)
+     }
+     return p - str;
+ }
++
++strList *strList_from_string(const char *in, char delim)
++{
++    strList *res = NULL;
++    strList **tail = &res;
++
++    while (in && in[0]) {
++        char *next = strchr(in, delim);
++        char *value;
++
++        if (next) {
++            value = g_strndup(in, next - in);
++            in = next + 1; /* skip the delim */
++        } else {
++            value = g_strdup(in);
++            in = NULL;
++        }
++        QAPI_LIST_APPEND(tail, value);
++    }
++
++    return res;
++}
+-- 
+1.8.3.1
+
+
+

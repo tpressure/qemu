@@ -1,0 +1,214 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 37/46] chardev: cpr for simple devices
+Date: Tue, 26 Jul 2022 09:10:34 -0700
+Content-Type: text/plain; charset=UTF-8
+
+Set QEMU_CHAR_FEATURE_CPR for devices that trivially support cpr-exec.
+char-stdio is slightly less trivial.  Allow the gdb server by
+closing it on exec.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ MAINTAINERS           |  1 +
+ chardev/char-mux.c    |  1 +
+ chardev/char-null.c   |  1 +
+ chardev/char-serial.c |  1 +
+ chardev/char-stdio.c  | 31 +++++++++++++++++++++++++++++++
+ gdbstub.c             |  1 +
+ stubs/meson.build     |  1 +
+ stubs/migration.c     | 33 +++++++++++++++++++++++++++++++++
+ 8 files changed, 70 insertions(+)
+ create mode 100644 stubs/migration.c
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 3af099a..b93b0bb 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -3038,6 +3038,7 @@ F: tests/qtest/migration-test.c
+ F: docs/devel/migration.rst
+ F: qapi/migration.json
+ F: tests/migration/
++F: stubs/migration.c
+ 
+ D-Bus
+ M: Marc-André Lureau <marcandre.lureau@redhat.com>
+diff --git a/chardev/char-mux.c b/chardev/char-mux.c
+index ee2d47b..d47fa31 100644
+--- a/chardev/char-mux.c
++++ b/chardev/char-mux.c
+@@ -337,6 +337,7 @@ static void qemu_chr_open_mux(Chardev *chr,
+      */
+     *be_opened = muxes_opened;
+     qemu_chr_fe_init(&d->chr, drv, errp);
++    qemu_chr_set_feature(chr, QEMU_CHAR_FEATURE_CPR);
+ }
+ 
+ static void qemu_chr_parse_mux(QemuOpts *opts, ChardevBackend *backend,
+diff --git a/chardev/char-null.c b/chardev/char-null.c
+index 1c6a290..02acaff 100644
+--- a/chardev/char-null.c
++++ b/chardev/char-null.c
+@@ -32,6 +32,7 @@ static void null_chr_open(Chardev *chr,
+                           Error **errp)
+ {
+     *be_opened = false;
++    qemu_chr_set_feature(chr, QEMU_CHAR_FEATURE_CPR);
+ }
+ 
+ static void char_null_class_init(ObjectClass *oc, void *data)
+diff --git a/chardev/char-serial.c b/chardev/char-serial.c
+index 4b0b83d..7aa2042 100644
+--- a/chardev/char-serial.c
++++ b/chardev/char-serial.c
+@@ -277,6 +277,7 @@ static void qmp_chardev_open_serial(Chardev *chr,
+     }
+     tty_serial_init(fd, 115200, 'N', 8, 1);
+ 
++    qemu_chr_set_feature(chr, QEMU_CHAR_FEATURE_CPR);
+     qemu_chr_open_fd(chr, fd, fd);
+ }
+ #endif /* __linux__ || __sun__ */
+diff --git a/chardev/char-stdio.c b/chardev/char-stdio.c
+index 3c64867..7a96bdc 100644
+--- a/chardev/char-stdio.c
++++ b/chardev/char-stdio.c
+@@ -27,6 +27,7 @@
+ #include "qemu/option.h"
+ #include "qemu/sockets.h"
+ #include "qapi/error.h"
++#include "migration/misc.h"
+ #include "chardev/char.h"
+ 
+ #ifdef _WIN32
+@@ -40,19 +41,46 @@
+ #ifndef _WIN32
+ /* init terminal so that we can grab keys */
+ static struct termios oldtty;
++static struct termios newtty;
+ static int old_fd0_flags;
++static int new_fd0_flags;
+ static bool stdio_in_use;
+ static bool stdio_allow_signal;
+ static bool stdio_echo_state;
++static Notifier cpr_notifier;
+ 
+ static void term_exit(void)
+ {
+     if (stdio_in_use) {
++        tcgetattr(0, &newtty);
++        new_fd0_flags = fcntl(0, F_GETFL);
++
+         tcsetattr(0, TCSANOW, &oldtty);
+         fcntl(0, F_SETFL, old_fd0_flags);
+     }
+ }
+ 
++static void term_reenter(void)
++{
++    if (stdio_in_use) {
++        tcsetattr(0, TCSANOW, &newtty);
++        fcntl(0, F_SETFL, new_fd0_flags);
++    }
++}
++
++static void term_cpr_exec_notifier(Notifier *notifier, void *data)
++{
++    MigrationState *s = data;
++
++    if (migrate_mode_of(s) == MIG_MODE_CPR_EXEC) {
++        if (migration_has_finished(s)) {
++            term_exit();
++        } else if (migration_has_failed(s)) {
++            term_reenter();
++        }
++    }
++}
++
+ static void qemu_chr_set_echo_stdio(Chardev *chr, bool echo)
+ {
+     struct termios tty;
+@@ -117,6 +145,8 @@ static void qemu_chr_open_stdio(Chardev *chr,
+ 
+     stdio_allow_signal = !opts->has_signal || opts->signal;
+     qemu_chr_set_echo_stdio(chr, false);
++    qemu_chr_set_feature(chr, QEMU_CHAR_FEATURE_CPR);
++    migration_add_notifier(&cpr_notifier, term_cpr_exec_notifier);
+ }
+ #endif
+ 
+@@ -147,6 +177,7 @@ static void char_stdio_finalize(Object *obj)
+ {
+ #ifndef _WIN32
+     term_exit();
++    migration_remove_notifier(&cpr_notifier);
+ #endif
+ }
+ 
+diff --git a/gdbstub.c b/gdbstub.c
+index cf869b1..08b3d80 100644
+--- a/gdbstub.c
++++ b/gdbstub.c
+@@ -3616,6 +3616,7 @@ int gdbserver_start(const char *device)
+         mon_chr = gdbserver_state.mon_chr;
+         reset_gdbserver_state();
+     }
++    mon_chr->reopen_on_cpr = true;
+ 
+     create_processes(&gdbserver_state);
+ 
+diff --git a/stubs/meson.build b/stubs/meson.build
+index 392b1b5..a1eda95 100644
+--- a/stubs/meson.build
++++ b/stubs/meson.build
+@@ -27,6 +27,7 @@ if libaio.found()
+   stub_ss.add(files('linux-aio.c'))
+ endif
+ stub_ss.add(files('migr-blocker.c'))
++stub_ss.add(files('migration.c'))
+ stub_ss.add(files('module-opts.c'))
+ stub_ss.add(files('monitor.c'))
+ stub_ss.add(files('monitor-core.c'))
+diff --git a/stubs/migration.c b/stubs/migration.c
+new file mode 100644
+index 0000000..f2f79bd
+--- /dev/null
++++ b/stubs/migration.c
+@@ -0,0 +1,33 @@
++/*
++ * Copyright (c) 2021, 2022 Oracle and/or its affiliates.
++ *
++ * This work is licensed under the terms of the GNU GPL, version 2.
++ * See the COPYING file in the top-level directory.
++ */
++
++#include "qemu/osdep.h"
++#include "migration/misc.h"
++
++void migration_add_notifier(Notifier *notify,
++                            void (*cb)(Notifier *notifier, void *data))
++{
++}
++
++void migration_remove_notifier(Notifier *notify)
++{
++}
++
++bool migration_has_finished(MigrationState *s)
++{
++    return false;
++}
++
++bool migration_has_failed(MigrationState *s)
++{
++    return false;
++}
++
++MigMode migrate_mode_of(MigrationState *s)
++{
++    return 0;
++}
+-- 
+1.8.3.1
+
+
+

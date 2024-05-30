@@ -1,0 +1,135 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 05/46] migration: migrate-enable-mode option
+Date: Tue, 26 Jul 2022 09:10:02 -0700
+
+Add the '-migrate-enable-mode <mode>' command-line option as a
+pre-requisite for migration using the mode.  Multiple
+-migrate-enable-mode options may be specified, one per mode.
+
+Requiring -migrate-enable-mode allows qemu to initialize objects
+differently, if necessary, so that migration for a mode is not blocked.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ include/migration/misc.h |  2 ++
+ migration/migration.c    | 31 +++++++++++++++++++++++++++++++
+ qemu-options.hx          | 10 ++++++++++
+ softmmu/vl.c             |  4 ++++
+ 4 files changed, 47 insertions(+)
+
+diff --git a/include/migration/misc.h b/include/migration/misc.h
+index 1e01134..71b6285 100644
+--- a/include/migration/misc.h
++++ b/include/migration/misc.h
+@@ -78,5 +78,7 @@ void dirty_bitmap_mig_init(void);
+ 
+ MigMode migrate_mode(void);
+ MigMode migrate_mode_of(MigrationState *s);
++void migrate_enable_mode(MigMode mode);
++bool migrate_mode_enabled(MigMode mode);
+ 
+ #endif
+diff --git a/migration/migration.c b/migration/migration.c
+index 38584db..5f704a9 100644
+--- a/migration/migration.c
++++ b/migration/migration.c
+@@ -173,6 +173,7 @@ INITIALIZE_MIGRATE_CAPS_SET(check_caps_background_snapshot,
+ 
+ static MigrationState *current_migration;
+ static MigrationIncomingState *current_incoming;
++static int migrate_enabled_modes = BIT(MIG_MODE_NORMAL);
+ 
+ static GSList *migration_blockers;
+ 
+@@ -2140,6 +2141,29 @@ bool migration_is_active(MigrationState *s)
+             s->state == MIGRATION_STATUS_POSTCOPY_ACTIVE);
+ }
+ 
++void migrate_enable_mode(MigMode mode)
++{
++    migrate_enabled_modes |= BIT(mode);
++}
++
++bool migrate_mode_enabled(MigMode mode)
++{
++    return !!(migrate_enabled_modes & BIT(mode));
++}
++
++static int migrate_check_enabled(Error **errp)
++{
++    MigMode mode = migrate_mode();
++
++    if (!migrate_mode_enabled(mode)) {
++        error_setg(errp, "migrate mode is not enabled.  "
++                         "Use '-migrate-mode-enable %s'.",
++                   MigMode_str(mode));
++        return -1;
++    }
++    return 0;
++}
++
+ void migrate_init(MigrationState *s)
+ {
+     /*
+@@ -2210,6 +2234,9 @@ void qmp_migrate_incoming(const char *uri, Error **errp)
+     Error *local_err = NULL;
+     static bool once = true;
+ 
++    if (migrate_check_enabled(errp)) {
++        return;
++    }
+     if (!once) {
+         error_setg(errp, "The incoming migration has already been started");
+         return;
+@@ -2356,6 +2383,10 @@ static bool migrate_prepare(MigrationState *s, bool blk, bool blk_inc,
+         return false;
+     }
+ 
++    if (migrate_check_enabled(errp)) {
++        return false;
++    }
++
+     if (migration_is_blocked(errp)) {
+         return false;
+     }
+diff --git a/qemu-options.hx b/qemu-options.hx
+index 5ff47f4..7797d3d 100644
+--- a/qemu-options.hx
++++ b/qemu-options.hx
+@@ -4491,6 +4491,16 @@ SRST
+     an unmigratable state.
+ ERST
+ 
++DEF("migrate-mode-enable", HAS_ARG, QEMU_OPTION_migrate_mode_enable, \
++    "-migrate-mode-enable <mode>    enable the migration mode.\n",
++    QEMU_ARCH_ALL)
++SRST
++``-migrate-mode-enable <mode>``
++    Enable the specified migrate mode.  May be supplied
++    multiple times, once per mode.  This is a pre-requisite for performing a
++    migration using any mode except 'normal'.
++ERST
++
+ DEF("nodefaults", 0, QEMU_OPTION_nodefaults, \
+     "-nodefaults     don't create default devices\n", QEMU_ARCH_ALL)
+ SRST
+diff --git a/softmmu/vl.c b/softmmu/vl.c
+index 7189eb6..83f3be0 100644
+--- a/softmmu/vl.c
++++ b/softmmu/vl.c
+@@ -3364,6 +3364,10 @@ void qemu_init(int argc, char **argv, char **envp)
+             case QEMU_OPTION_only_migratable:
+                 only_migratable = 1;
+                 break;
++            case QEMU_OPTION_migrate_mode_enable:
++                migrate_enable_mode(qapi_enum_parse(&MigMode_lookup, optarg, -1,
++                                                    &error_fatal));
++                break;
+             case QEMU_OPTION_nodefaults:
+                 has_defaults = 0;
+                 break;
+-- 
+1.8.3.1
+
+
+

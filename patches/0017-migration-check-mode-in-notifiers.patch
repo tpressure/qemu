@@ -1,0 +1,62 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 17/46] migration: check mode in notifiers
+Date: Tue, 26 Jul 2022 09:10:14 -0700
+
+The existing notifiers should only apply to normal mode.
+
+No functional change.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ hw/net/virtio-net.c | 4 ++++
+ hw/vfio/migration.c | 3 +++
+ ui/spice-core.c     | 2 +-
+ 3 files changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/hw/net/virtio-net.c b/hw/net/virtio-net.c
+index 29af1a5..06f0dbe 100644
+--- a/hw/net/virtio-net.c
++++ b/hw/net/virtio-net.c
+@@ -3351,6 +3351,10 @@ static void virtio_net_handle_migration_primary(VirtIONet *n, MigrationState *s)
+ static void virtio_net_migration_state_notifier(Notifier *notifier, void *data)
+ {
+     MigrationState *s = data;
++
++    if (migrate_mode_of(s) != MIG_MODE_NORMAL) {
++        return;
++    }
+     VirtIONet *n = container_of(notifier, VirtIONet, migration_state);
+     virtio_net_handle_migration_primary(n, s);
+ }
+diff --git a/hw/vfio/migration.c b/hw/vfio/migration.c
+index 5109124..6b0d401 100644
+--- a/hw/vfio/migration.c
++++ b/hw/vfio/migration.c
+@@ -759,6 +759,9 @@ static void vfio_migration_state_notifier(Notifier *notifier, void *data)
+     VFIODevice *vbasedev = migration->vbasedev;
+     int ret;
+ 
++    if (migrate_mode_of(s) != MIG_MODE_NORMAL) {
++        return;
++    }
+     trace_vfio_migration_state_notifier(vbasedev->name,
+                                         MigrationStatus_str(s->state));
+ 
+diff --git a/ui/spice-core.c b/ui/spice-core.c
+index 62b7893..413c392 100644
+--- a/ui/spice-core.c
++++ b/ui/spice-core.c
+@@ -558,7 +558,7 @@ static void migration_state_notifier(Notifier *notifier, void *data)
+ {
+     MigrationState *s = data;
+ 
+-    if (!spice_have_target_host) {
++    if (!spice_have_target_host || migrate_mode_of(s) != MIG_MODE_NORMAL) {
+         return;
+     }
+ 
+-- 
+1.8.3.1
+
+
+

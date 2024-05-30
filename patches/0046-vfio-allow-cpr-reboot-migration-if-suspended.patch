@@ -1,0 +1,124 @@
+From: Steve Sistare <steven.sistare@oracle.com>
+Subject: [PATCH V9 46/46] vfio: allow cpr-reboot migration if suspended
+Date: Tue, 26 Jul 2022 09:10:43 -0700
+
+The cpr-reboot mode supports vfio devices if the caller first suspends the
+guest, such as by issuing guest-suspend-ram to the qemu guest agent.  The
+guest drivers' suspend methods flush outstanding requests and re-initialize
+the devices, and thus there is no device state to save and restore.
+
+Relax the vfio blocker, and add a notifier that verifies the guest is
+suspended.  Skip dirty page tracking to avoid ioctl errors.
+
+Signed-off-by: Steve Sistare <steven.sistare@oracle.com>
+---
+ hw/vfio/common.c              |  8 ++++++--
+ hw/vfio/cpr.c                 | 21 +++++++++++++++++++++
+ hw/vfio/migration.c           |  3 ++-
+ include/hw/vfio/vfio-common.h |  1 +
+ 4 files changed, 30 insertions(+), 3 deletions(-)
+
+diff --git a/hw/vfio/common.c b/hw/vfio/common.c
+index de821e1..5b54cbe 100644
+--- a/hw/vfio/common.c
++++ b/hw/vfio/common.c
+@@ -1355,14 +1355,18 @@ static void vfio_listener_log_global_start(MemoryListener *listener)
+ {
+     VFIOContainer *container = container_of(listener, VFIOContainer, listener);
+ 
+-    vfio_set_dirty_page_tracking(container, true);
++    if (!runstate_check(RUN_STATE_SUSPENDED)) {
++        vfio_set_dirty_page_tracking(container, true);
++    }
+ }
+ 
+ static void vfio_listener_log_global_stop(MemoryListener *listener)
+ {
+     VFIOContainer *container = container_of(listener, VFIOContainer, listener);
+ 
+-    vfio_set_dirty_page_tracking(container, false);
++    if (!runstate_check(RUN_STATE_SUSPENDED)) {
++        vfio_set_dirty_page_tracking(container, false);
++    }
+ }
+ 
+ static int vfio_get_dirty_bitmap(VFIOContainer *container, uint64_t iova,
+diff --git a/hw/vfio/cpr.c b/hw/vfio/cpr.c
+index 1f682cb..ef8827c 100644
+--- a/hw/vfio/cpr.c
++++ b/hw/vfio/cpr.c
+@@ -10,6 +10,7 @@
+ #include <linux/vfio.h>
+ #include "hw/vfio/vfio-common.h"
+ #include "sysemu/kvm.h"
++#include "sysemu/runstate.h"
+ #include "qapi/error.h"
+ #include "migration/blocker.h"
+ #include "migration/migration.h"
+@@ -132,8 +133,26 @@ static void vfio_cpr_fail_notifier(Notifier *notifier, void *data)
+     }
+ }
+ 
++static void vfio_cpr_reboot_notifier(Notifier *notifier, void *data)
++{
++    MigrationState *s = data;
++
++    if (migrate_mode_of(s) == MIG_MODE_CPR_REBOOT &&
++        !migration_has_failed(s) &&
++        !runstate_check(RUN_STATE_SUSPENDED)) {
++
++        Error *err = NULL;
++        error_setg(&err, "VFIO device only supports cpr-reboot for "
++                         "runstate suspended");
++        migration_notifier_set_error(s, err);
++    }
++}
++
+ int vfio_cpr_register_container(VFIOContainer *container, Error **errp)
+ {
++    migration_add_notifier(&container->cpr_reboot_notifier,
++                           vfio_cpr_reboot_notifier);
++
+     container->cpr_blocker = NULL;
+     if (!vfio_is_cpr_capable(container, &container->cpr_blocker)) {
+         return migrate_add_blockers(&container->cpr_blocker, errp,
+@@ -148,6 +167,8 @@ int vfio_cpr_register_container(VFIOContainer *container, Error **errp)
+ 
+ void vfio_cpr_unregister_container(VFIOContainer *container)
+ {
++    migration_remove_notifier(&container->cpr_reboot_notifier);
++
+     migrate_del_blocker(&container->cpr_blocker);
+ 
+     vmstate_unregister(NULL, &vfio_container_vmstate, container);
+diff --git a/hw/vfio/migration.c b/hw/vfio/migration.c
+index 6b0d401..3919941 100644
+--- a/hw/vfio/migration.c
++++ b/hw/vfio/migration.c
+@@ -890,7 +890,8 @@ add_blocker:
+                "VFIO device doesn't support migration");
+     g_free(info);
+ 
+-    return migrate_add_blocker(&vbasedev->migration_blocker, errp);
++    return migrate_add_blockers(&vbasedev->migration_blocker, errp,
++                                MIG_MODE_NORMAL, -1);
+ }
+ 
+ void vfio_migration_finalize(VFIODevice *vbasedev)
+diff --git a/include/hw/vfio/vfio-common.h b/include/hw/vfio/vfio-common.h
+index b682645..243376b 100644
+--- a/include/hw/vfio/vfio-common.h
++++ b/include/hw/vfio/vfio-common.h
+@@ -83,6 +83,7 @@ typedef struct VFIOContainer {
+     MemoryListener prereg_listener;
+     Notifier cpr_notifier;
+     Error *cpr_blocker;
++    Notifier cpr_reboot_notifier;
+     unsigned iommu_type;
+     Error *error;
+     bool initialized;
+-- 
+1.8.3.1
+
+
+
