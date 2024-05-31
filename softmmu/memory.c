@@ -2612,7 +2612,7 @@ static void memory_region_add_subregion_common(MemoryRegion *mr,
     for (alias = subregion->alias; alias; alias = alias->alias) {
         alias->mapped_via_alias++;
     }
-    subregion->addr = offset;
+    memory_region_set_address_only(subregion, offset);
     memory_region_update_container_subregions(subregion);
 }
 
@@ -2692,10 +2692,16 @@ static void memory_region_readd_subregion(MemoryRegion *mr)
     }
 }
 
+void memory_region_set_address_only(MemoryRegion *mr, hwaddr addr)
+{
+    mr->addr = addr;
+    mr->has_addr = true;
+}
+
 void memory_region_set_address(MemoryRegion *mr, hwaddr addr)
 {
     if (addr != mr->addr) {
-        mr->addr = addr;
+        memory_region_set_address_only(mr, addr);
         memory_region_readd_subregion(mr);
     }
 }
@@ -2741,6 +2747,27 @@ static FlatRange *flatview_lookup(FlatView *view, AddrRange addr)
 bool memory_region_is_mapped(MemoryRegion *mr)
 {
     return !!mr->container || mr->mapped_via_alias;
+}
+
+int address_space_flat_for_each_section(AddressSpace *as,
+                                        memory_region_section_cb func,
+                                        void *opaque,
+                                        Error **errp)
+{
+    FlatView *view = address_space_get_flatview(as);
+    FlatRange *fr;
+    int ret;
+
+    FOR_EACH_FLAT_RANGE(fr, view) {
+        MemoryRegionSection mrs = section_from_flat_range(fr, view);
+        ret = func(&mrs, opaque, errp);
+        if (ret) {
+            return ret;
+        }
+    }
+
+    flatview_unref(view);
+    return 0;
 }
 
 /* Same as memory_region_find, but it does not add a reference to the

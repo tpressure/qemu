@@ -3064,6 +3064,7 @@ F: tests/qtest/migration-test.c
 F: docs/devel/migration.rst
 F: qapi/migration.json
 F: tests/migration/
+F: stubs/migration.c
 
 D-Bus
 M: Marc-André Lureau <marcandre.lureau@redhat.com>
@@ -3185,6 +3186,19 @@ F: net/colo*
 F: net/filter-rewriter.c
 F: net/filter-mirror.c
 F: tests/qtest/test-filter*
+
+CPR
+M: Steve Sistare <steven.sistare@oracle.com>
+R: Mark Kanda <mark.kanda@oracle.com>
+S: Maintained
+F: tests/unit/test-strlist.c
+F: include/migration/cpr-state.h
+F: migration/cpr-state.c
+F: stubs/cpr-state.c
+F: include/migration/cpr.h
+F: migration/cpr.c
+F: hw/vfio/cpr.c
+F: tests/avocado/cpr.py
 
 Record/replay
 M: Pavel Dovgalyuk <pavel.dovgaluk@ispras.ru>

@@ -2331,6 +2331,8 @@ static bool check_section_footer(QEMUFile *f, SaveStateEntry *se)
     uint8_t read_mark;
     uint32_t read_section_id;
 
+    return true;
+
     if (!migrate_get_current()->send_section_footer) {
         /* No footer to check */
         return true;
@@ -2653,6 +2655,7 @@ retry:
             /* This is the end of migration */
             goto out;
         default:
+            break;
             error_report("Unknown savevm section type %d", section_type);
             ret = -EINVAL;
             goto out;

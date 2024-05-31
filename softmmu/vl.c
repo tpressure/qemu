@@ -28,6 +28,7 @@
 #include "qemu/units.h"
 #include "exec/cpu-common.h"
 #include "exec/page-vary.h"
+#include "exec/memory.h"
 #include "hw/qdev-properties.h"
 #include "qapi/compat-policy.h"
 #include "qapi/error.h"
@@ -75,6 +76,7 @@
 #include "hw/block/block.h"
 #include "hw/i386/x86.h"
 #include "hw/i386/pc.h"
+#include "migration/cpr.h"
 #include "migration/misc.h"
 #include "migration/snapshot.h"
 #include "sysemu/tpm.h"
@@ -2611,6 +2613,7 @@ void qmp_x_exit_preconfig(Error **errp)
     qemu_init_board();
     qemu_create_cli_devices();
     qemu_machine_creation_done();
+    ram_block_add_cpr_blockers(&error_fatal);
 
     if (loadvm) {
         load_snapshot(loadvm, NULL, false, NULL, &error_fatal);
@@ -3353,6 +3356,13 @@ void qemu_init(int argc, char **argv)
                 break;
             case QEMU_OPTION_only_migratable:
                 only_migratable = 1;
+                break;
+            case QEMU_OPTION_only_cpr_capable:
+                only_cpr_capable = true;
+                break;
+            case QEMU_OPTION_migrate_mode_enable:
+                migrate_enable_mode(qapi_enum_parse(&MigMode_lookup, optarg, -1,
+                                                    &error_fatal));
                 break;
             case QEMU_OPTION_nodefaults:
                 has_defaults = 0;

@@ -32,11 +32,13 @@
 #include "exec/cpu-common.h"
 #include "exec/gdbstub.h"
 #include "hw/boards.h"
+#include "migration/cpr.h"
 #include "migration/misc.h"
 #include "migration/postcopy-ram.h"
 #include "monitor/monitor.h"
 #include "net/net.h"
 #include "net/vhost_net.h"
+#include "qapi/util.h"
 #include "qapi/error.h"
 #include "qapi/qapi-commands-run-state.h"
 #include "qapi/qapi-events-run-state.h"
@@ -152,6 +154,7 @@ static const RunStateTransition runstate_transitions_def[] = {
     { RUN_STATE_RUNNING, RUN_STATE_SUSPENDED },
     { RUN_STATE_SUSPENDED, RUN_STATE_RUNNING },
     { RUN_STATE_SUSPENDED, RUN_STATE_FINISH_MIGRATE },
+    { RUN_STATE_SUSPENDED, RUN_STATE_PAUSED },
     { RUN_STATE_SUSPENDED, RUN_STATE_PRELAUNCH },
     { RUN_STATE_SUSPENDED, RUN_STATE_COLO},
 
@@ -336,6 +339,7 @@ void vm_state_notify(bool running, RunState state)
     }
 }
 
+static bool start_on_wakeup_requested;
 static ShutdownCause reset_requested;
 static ShutdownCause shutdown_requested;
 static int shutdown_signal;
@@ -353,6 +357,7 @@ static NotifierList wakeup_notifiers =
 static NotifierList shutdown_notifiers =
     NOTIFIER_LIST_INITIALIZER(shutdown_notifiers);
 static uint32_t wakeup_reason_mask = ~(1 << QEMU_WAKEUP_REASON_NONE);
+static GStrv exec_argv;
 
 ShutdownCause qemu_shutdown_requested_get(void)
 {
@@ -367,6 +372,11 @@ ShutdownCause qemu_reset_requested_get(void)
 static int qemu_shutdown_requested(void)
 {
     return qatomic_xchg(&shutdown_requested, SHUTDOWN_CAUSE_NONE);
+}
+
+static int qemu_exec_requested(void)
+{
+    return exec_argv != NULL;
 }
 
 static void qemu_kill_report(void)
@@ -569,6 +579,11 @@ void qemu_register_suspend_notifier(Notifier *notifier)
     notifier_list_add(&suspend_notifiers, notifier);
 }
 
+void qemu_system_start_on_wakeup_request(void)
+{
+    start_on_wakeup_requested = true;
+}
+
 void qemu_system_wakeup_request(WakeupReason reason, Error **errp)
 {
     trace_system_wakeup_request(reason);
@@ -581,7 +596,14 @@ void qemu_system_wakeup_request(WakeupReason reason, Error **errp)
     if (!(wakeup_reason_mask & (1 << reason))) {
         return;
     }
-    runstate_set(RUN_STATE_RUNNING);
+
+    if (start_on_wakeup_requested) {
+        start_on_wakeup_requested = false;
+        vm_start();
+    } else {
+        runstate_set(RUN_STATE_RUNNING);
+    }
+
     wakeup_reason = reason;
     qemu_notify_event();
 }
@@ -633,6 +655,13 @@ void qemu_system_shutdown_request(ShutdownCause reason)
     qemu_notify_event();
 }
 
+void qemu_system_exec_request(const strList *args)
+{
+    exec_argv = strv_from_strList(args);
+    shutdown_requested = 1;
+    qemu_notify_event();
+}
+
 static void qemu_system_powerdown(void)
 {
     qapi_event_send_powerdown();
@@ -681,6 +710,17 @@ static bool main_loop_should_exit(int *status)
     }
     request = qemu_shutdown_requested();
     if (request) {
+
+        if (qemu_exec_requested()) {
+            Error *err = NULL;
+            cpr_preserve_fds();
+            execvp(exec_argv[0], exec_argv);
+            error_setg_errno(&err, errno, "execvp %s failed", exec_argv[0]);
+            cpr_exec_failed(err);
+            g_strfreev(exec_argv);
+            exec_argv = NULL;
+            return false;
+        }
         qemu_kill_report();
         qemu_system_shutdown(request);
         if (shutdown_action == SHUTDOWN_ACTION_PAUSE) {
